@@ -1,0 +1,31 @@
+[project]
+name = "career-fair-api"
+version = "0.1.0"
+description = "FastAPI backend template with Pydantic v2, SQLAlchemy async, PostgreSQL, JWT auth, Alembic, managed by uv"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Your Team" }
+]
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "pydantic>=2.7.0",
+  "pydantic-settings>=2.4.0",
+  "sqlalchemy>=2.0.30",
+  "asyncpg>=0.29.0",
+  "alembic>=1.13.1",
+  "passlib[bcrypt]>=1.7.4",
+  "bcrypt==4.0.1",
+  "python-jose[cryptography]>=3.3.0",
+  "email-validator>=2.1.0.post1",
+  "black>=25.9.0",
+]
+
+[tool.uv]
+# uv 使用 PEP 621。可以通过 `uv sync` 安装依赖，并使用 `uv run` 运行命令。
+
+[tool.ruff]
+line-length = 100
+
+

@@ -25,6 +25,15 @@ class Settings(BaseSettings):
 
     BACKEND_CORS_ORIGINS: List[str] = Field(default_factory=list)
 
+    # Logging
+    LOG_LEVEL: str = Field(
+        default="INFO", description="日志等级，例如 INFO/DEBUG/WARN/ERROR"
+    )
+    LOG_FORMAT: str = Field(default="json", description="日志格式：json 或 console")
+    LOG_JSON_PRETTY: bool = Field(
+        default=False, description="开发环境下是否美化 JSON 日志"
+    )
+
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, v):
@@ -38,6 +47,15 @@ class Settings(BaseSettings):
                 return s
             return [i.strip() for i in s.split(",") if i.strip()]
         return v
+
+    @field_validator("LOG_FORMAT", mode="before")
+    @classmethod
+    def normalize_log_format(cls, v):
+        if isinstance(v, str):
+            vv = v.strip().lower()
+            if vv in {"json", "console"}:
+                return vv
+        return "json"
 
 
 @lru_cache

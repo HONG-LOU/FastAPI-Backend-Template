@@ -23,6 +23,11 @@ class Settings(BaseSettings):
         ..., description="postgresql+asyncpg://user:pass@host:port/db"
     )
 
+    # Redis
+    REDIS_URL: str = Field(
+        default="redis://localhost:6379/0", description="Redis 连接 URL"
+    )
+
     BACKEND_CORS_ORIGINS: List[str] = Field(default_factory=list)
 
     # Logging

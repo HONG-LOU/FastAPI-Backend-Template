@@ -17,6 +17,7 @@ from alembic import context
 
 from app.db.base import Base
 from app.models import user, refresh_token  # noqa: F401  # 导入以便元数据可见
+from app.models import chat, attachment  # noqa: F401  # 让 Alembic 看到新表
 from app.core.config import settings
 
 

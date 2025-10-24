@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import List
 
 from fastapi import (
@@ -12,7 +11,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from sqlalchemy import and_, desc, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.api.deps import DBSession, get_current_user
 from app.core.redis import publish_json, get_redis
@@ -38,9 +37,34 @@ router = APIRouter()
 async def create_direct_room(
     payload: RoomCreateDirect, db: DBSession, user: User = Depends(get_current_user)
 ) -> RoomOut:
-    # 检查是否已有 direct 房间
-    # 简化：按两人唯一房间策略（可扩展为 room_members hash）
-    # 这里直接创建一个新房间并插入两名参与者（生产环境可做幂等）
+    # 自聊校验
+    if payload.user_id == user.id:
+        raise HTTPException(
+            status_code=400, detail="cannot create direct room with self"
+        )
+
+    # 若两人已有 direct 房间则复用
+    cp1 = aliased(ChatParticipant)
+    cp2 = aliased(ChatParticipant)
+    stmt = (
+        select(ChatRoom)
+        .join(cp1, cp1.room_id == ChatRoom.id)
+        .join(cp2, cp2.room_id == ChatRoom.id)
+        .where(
+            and_(
+                ChatRoom.type == "direct",
+                cp1.user_id == user.id,
+                cp2.user_id == payload.user_id,
+            )
+        )
+        .order_by(ChatRoom.id)
+        .limit(1)
+    )
+    existing = (await db.execute(stmt)).scalars().first()
+    if existing is not None:
+        return RoomOut.model_validate(existing, from_attributes=True)
+
+    # 不存在则创建
     room = ChatRoom(type="direct")
     db.add(room)
     await db.flush()
@@ -52,7 +76,7 @@ async def create_direct_room(
     )
     await db.commit()
     await db.refresh(room)
-    return room
+    return RoomOut.model_validate(room, from_attributes=True)
 
 
 @router.get("/rooms/{room_id}/messages", response_model=List[MessageOut])
@@ -77,7 +101,7 @@ async def list_messages(
         stmt = stmt.where(Message.id < cursor)
     stmt = stmt.order_by(desc(Message.id)).limit(limit)
     rows = (await db.execute(stmt)).scalars().all()
-    return rows
+    return [MessageOut.model_validate(m, from_attributes=True) for m in rows]
 
 
 @router.post("/messages", response_model=MessageOut)
@@ -118,7 +142,7 @@ async def send_message(
             "created_at": msg.created_at.isoformat(),
         },
     )
-    return msg
+    return MessageOut.model_validate(msg, from_attributes=True)
 
 
 @router.post("/rooms/{room_id}/read")
@@ -127,7 +151,7 @@ async def mark_read(
     body: MarkReadIn,
     db: DBSession,
     user: User = Depends(get_current_user),
-) -> dict:
+) -> dict[str, bool]:
     # 校验参与者
     exists = await db.execute(
         select(ChatParticipant).where(

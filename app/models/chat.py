@@ -25,6 +25,7 @@ class ChatParticipant(Base):
     )
     role: Mapped[str] = mapped_column(String(16), default="participant")
     joined_at: Mapped[datetime] = mapped_column(default=func.now())
+    last_read_message_id: Mapped[int | None] = mapped_column(index=True)
 
 
 class Message(Base):

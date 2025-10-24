@@ -23,13 +23,23 @@ def create_app() -> FastAPI:
 
     # CORS
     if settings.BACKEND_CORS_ORIGINS:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=settings.BACKEND_CORS_ORIGINS,
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
+        # 支持通配：当为 ["*"] 时使用正则放通所有来源（兼容 allow_credentials=True）
+        if settings.BACKEND_CORS_ORIGINS == ["*"]:
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origin_regex=".*",
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+        else:
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origins=settings.BACKEND_CORS_ORIGINS,
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
 
     # Middlewares
     app.add_middleware(RequestContextMiddleware)

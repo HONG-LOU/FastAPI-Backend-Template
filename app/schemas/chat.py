@@ -53,3 +53,11 @@ class AttachmentOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class MarkReadIn(BaseModel):
+    last_read_message_id: int
+
+
+class UnreadCountOut(BaseModel):
+    count: int

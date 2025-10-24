@@ -67,6 +67,7 @@ def upgrade() -> None:
         sa.Column(
             "joined_at", sa.DateTime(), nullable=True, server_default=sa.func.now()
         ),
+        sa.Column("last_read_message_id", sa.Integer(), nullable=True),
         sa.ForeignKeyConstraint(["room_id"], ["chat_rooms.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("room_id", "user_id"),
@@ -75,6 +76,12 @@ def upgrade() -> None:
         op.f("ix_chat_participants_user_id"),
         "chat_participants",
         ["user_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_chat_participants_last_read_message_id"),
+        "chat_participants",
+        ["last_read_message_id"],
         unique=False,
     )
 

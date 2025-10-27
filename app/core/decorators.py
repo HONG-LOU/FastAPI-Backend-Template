@@ -24,7 +24,7 @@ def log_exceptions(logger: logging.Logger | None = None) -> Callable[[F], F]:
                     return await cast(Callable[..., Awaitable[Any]], func)(
                         *args, **kwargs
                     )
-                except Exception as exc:  # noqa: BLE001
+                except Exception:  # noqa: BLE001
                     rid = get_request_id()
                     _logger.exception("Unhandled in %s rid=%s", func.__name__, rid)
                     raise
@@ -35,7 +35,7 @@ def log_exceptions(logger: logging.Logger | None = None) -> Callable[[F], F]:
         def sync_wrapper(*args: Any, **kwargs: Any):
             try:
                 return func(*args, **kwargs)
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 rid = get_request_id()
                 _logger.exception("Unhandled in %s rid=%s", func.__name__, rid)
                 raise

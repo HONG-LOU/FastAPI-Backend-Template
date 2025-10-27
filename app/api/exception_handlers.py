@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict
 
 from fastapi import Request
@@ -11,9 +10,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.context import get_request_id
 from app.core.exceptions import AppException
+from app.core.logging import get_logger
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _base_payload(message: str, code: str) -> Dict[str, Any]:
@@ -25,9 +25,7 @@ def _base_payload(message: str, code: str) -> Dict[str, Any]:
 
 
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    payload = _base_payload(
-        exc.detail if isinstance(exc.detail, str) else str(exc.detail), "http_error"
-    )
+    payload = _base_payload(str(exc.detail), "http_error")
     return JSONResponse(status_code=exc.status_code, content=payload)
 
 

@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import List
+from typing import List, Sequence, cast
 
 from pydantic import Field
 from pydantic import field_validator
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
-    def parse_cors_origins(cls, v):
+    def parse_cors_origins(cls, v: object) -> List[str] | str:
         # 支持逗号分隔字符串或 JSON 数组
         if v is None or v == "":
             return []
@@ -50,12 +50,20 @@ class Settings(BaseSettings):
             if s.startswith("[") and s.endswith("]"):
                 # 让 pydantic 继续解析 JSON
                 return s
-            return [i.strip() for i in s.split(",") if i.strip()]
-        return v
+            return [item.strip() for item in s.split(",") if item.strip()]
+        if isinstance(v, Sequence) and not isinstance(v, (str, bytes)):
+            items: Sequence[object] = cast(Sequence[object], v)
+            out: List[str] = []
+            for item in items:
+                s = str(item).strip()
+                if s:
+                    out.append(s)
+            return out
+        return []
 
     @field_validator("LOG_FORMAT", mode="before")
     @classmethod
-    def normalize_log_format(cls, v):
+    def normalize_log_format(cls, v: object) -> str:
         if isinstance(v, str):
             vv = v.strip().lower()
             if vv in {"json", "console"}:
@@ -65,7 +73,8 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    # 基于环境变量的配置在运行时填充，此处对静态检查忽略缺少必填参数的告警
+    return Settings()  # pyright: ignore[reportCallIssue]
 
 
 settings = get_settings()

@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from typing import cast
+from starlette.types import ExceptionHandler as StarletteExceptionHandler
 
 from app.core.config import settings
 from app.api.routers.auth import router as auth_router
@@ -53,13 +55,24 @@ def create_app() -> FastAPI:
     from fastapi.exceptions import RequestValidationError
     from fastapi import HTTPException as FastAPIHTTPException
 
-    app.add_exception_handler(FastAPIHTTPException, http_exception_handler)
-    app.add_exception_handler(AppException, app_exception_handler)
-    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(
+        FastAPIHTTPException, cast(StarletteExceptionHandler, http_exception_handler)
+    )
+    app.add_exception_handler(
+        AppException, cast(StarletteExceptionHandler, app_exception_handler)
+    )
+    app.add_exception_handler(
+        RequestValidationError,
+        cast(StarletteExceptionHandler, validation_exception_handler),
+    )
     from jose import JWTError
 
-    app.add_exception_handler(JWTError, jwt_exception_handler)
-    app.add_exception_handler(Exception, unhandled_exception_handler)
+    app.add_exception_handler(
+        JWTError, cast(StarletteExceptionHandler, jwt_exception_handler)
+    )
+    app.add_exception_handler(
+        Exception, cast(StarletteExceptionHandler, unhandled_exception_handler)
+    )
     return app
 
 

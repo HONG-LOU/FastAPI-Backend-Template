@@ -1,2 +1,3 @@
-from .auth import router as auth
-from .health import router as health
+from .profile import router as profile_router
+
+__all__ = []

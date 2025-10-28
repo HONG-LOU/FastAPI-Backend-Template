@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     LOG_FORMAT: Literal["json", "console"] = "json"
     LOG_JSON_PRETTY: bool = False
 
+    UPLOAD_DIR: str = "uploads"
+
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, v: object) -> list[str]:

@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.api.routers.auth import router as auth_router
 from app.api.routers.health import router as health_router
 from app.api.routers.chat import router as chat_router
+from app.api.routers.profile import router as profile_router
 from app.api.exception_handlers import (
     http_exception_handler,
     app_exception_handler,
@@ -52,6 +53,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
     app.include_router(health_router, prefix="/api", tags=["health"])
     app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
+    app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
 
     # Exception handlers
     from fastapi.exceptions import RequestValidationError

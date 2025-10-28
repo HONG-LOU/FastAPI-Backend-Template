@@ -22,4 +22,5 @@ alembic/versions/__pycache__/
 Thumbs.db
 *.log
 
+/uploads/
 

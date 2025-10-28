@@ -10,8 +10,8 @@ class Attachment(Base):
     __tablename__ = "attachments"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    message_id: Mapped[int] = mapped_column(
-        ForeignKey("messages.id", ondelete="CASCADE"), index=True
+    message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"), index=True, nullable=True
     )
     uploader_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True

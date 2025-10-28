@@ -52,7 +52,6 @@ class ColorConsoleFormatter(logging.Formatter):
         super().__init__(fmt="%(message)s")
 
     def _supports_color(self) -> bool:
-        # 只要是交互式终端就启用颜色；在 Windows 下由 colorama 负责转换
         return sys.stdout.isatty()
 
     def format(self, record: logging.LogRecord) -> str:  # type: ignore[override]
@@ -76,7 +75,6 @@ class ColorConsoleFormatter(logging.Formatter):
         if rid:
             segments.append(f"{dim}rid={rid}{reset}")
 
-        # 合并用户 extra 字段
         extras_obj = getattr(record, "ipdn_extra", None)
         if isinstance(extras_obj, dict):
             extras_any: dict[Any, Any] = cast(dict[Any, Any], extras_obj)
@@ -103,13 +101,11 @@ class ContextLoggerAdapter(logging.LoggerAdapter[logging.Logger]):
         fields = kwargs.pop("extra", None)
         if fields is None:
             fields = {}
-        # 基础 extra 来自 adapter
         base_extra: dict[str, Any] = cast(dict[str, Any], dict(self.extra or {}))
         if fields:
             merged_fields: dict[str, Any] = {**base_extra, **fields}
         else:
             merged_fields = base_extra
-        # 嵌入到 record.ipdn_extra，便于 JSONFormatter/ColorConsoleFormatter 统一处理
         kwargs["extra"] = {"ipdn_extra": merged_fields}
         return msg, kwargs
 
@@ -134,7 +130,6 @@ def _create_handler() -> logging.Handler:
 
 
 def _hook_uvicorn(level: int) -> None:
-    # 让 uvicorn 的日志走根 logger，避免重复格式化
     for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
         lg = logging.getLogger(name)
         for h in list(lg.handlers):
@@ -144,12 +139,10 @@ def _hook_uvicorn(level: int) -> None:
 
 
 def configure_logging() -> None:
-    # 在 Windows 上启用 ANSI 转换，确保 PowerShell/cmd 也能显示颜色
     if os.name == "nt":
         try:
             import colorama  # type: ignore[reportMissingTypeStubs]
 
-            # convert=True: 将 ANSI 转为 Win32 调用；strip=False: 保留 ANSI 给支持的终端
             colorama.init(convert=True, strip=False)
         except Exception:
             pass
@@ -166,7 +159,6 @@ def configure_logging() -> None:
 
     _hook_uvicorn(level)
 
-    # 降低冗长依赖库日志
     for noisy in [
         "sqlalchemy.engine",
         "asyncpg",

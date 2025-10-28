@@ -2,53 +2,57 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Callable, Awaitable
+from starlette.types import ASGIApp, Scope, Receive, Send, Message
 
-from fastapi import Request
-from starlette.responses import Response
-from starlette.middleware.base import BaseHTTPMiddleware
-
-from app.core.context import (
-    set_request_id,
-    set_request_start_time,
-)
+from app.core.context import set_request_id, set_request_start_time
 from app.core.logging import get_logger
 
 
-class RequestContextMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:  # type: ignore[override]
-        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
-        set_request_id(request_id)
+class RequestContextMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
 
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
+        request_id = headers.get("x-request-id") or uuid.uuid4().hex
+        set_request_id(request_id)
         start = time.perf_counter()
         set_request_start_time(start)
         logger = get_logger("app.request")
-        try:
-            response: Response = await call_next(request)
-        finally:
-            duration_ms = int((time.perf_counter() - start) * 1000)
-            set_request_id(None)
-            set_request_start_time(None)
+        status_code: int | None = None
+
+        async def send_wrapper(message: Message) -> None:
+            nonlocal status_code
+            if message.get("type") == "http.response.start":
+                status_code = int(message.get("status", 0))
+            await send(message)
 
         try:
-            client = request.client.host if request.client else "-"
-            ua = request.headers.get("user-agent", "-")
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            method = scope.get("method", "-")
+            path = scope.get("path", "-")
+            client = (scope.get("client") or (None, None))[0] or "-"
+            ua = headers.get("user-agent", "-")[:200]
             logger.info(
                 "%s %s -> %s %sms",
-                request.method,
-                request.url.path,
-                response.status_code,
+                method,
+                path,
+                status_code or 0,
                 duration_ms,
                 extra={
-                    "method": request.method,
-                    "path": request.url.path,
-                    "status": response.status_code,
+                    "method": method,
+                    "path": path,
+                    "status": status_code or 0,
                     "duration_ms": duration_ms,
                     "client": client,
-                    "user_agent": ua[:200],
+                    "user_agent": ua,
                 },
             )
-        except Exception:
-            # 访问日志不应影响主流程
-            pass
-        return response
+            set_request_id(None)
+            set_request_start_time(None)

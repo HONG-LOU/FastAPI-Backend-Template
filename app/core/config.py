@@ -1,8 +1,7 @@
 from functools import lru_cache
-from typing import cast
+from typing import Literal, cast
 from collections.abc import Sequence
 
-from pydantic import Field
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -15,51 +14,36 @@ class Settings(BaseSettings):
     APP_NAME: str = "Career Fair API"
     APP_ENV: str = "dev"
 
-    SECRET_KEY: str = Field(..., description="JWT 密钥")
+    SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
 
-    DATABASE_URL: str = Field(
-        ..., description="postgresql+asyncpg://user:pass@host:port/db"
-    )
+    DATABASE_URL: str
 
     # Redis
-    REDIS_URL: str = Field(
-        default="redis://localhost:6379/0", description="Redis 连接 URL"
-    )
+    REDIS_URL: str
 
-    BACKEND_CORS_ORIGINS: list[str] = Field(default_factory=list)
+    BACKEND_CORS_ORIGINS: list[str] = []
 
     # Logging
-    LOG_LEVEL: str = Field(
-        default="INFO", description="日志等级，例如 INFO/DEBUG/WARN/ERROR"
-    )
-    LOG_FORMAT: str = Field(default="json", description="日志格式：json 或 console")
-    LOG_JSON_PRETTY: bool = Field(
-        default=False, description="开发环境下是否美化 JSON 日志"
-    )
+    LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    LOG_FORMAT: Literal["json", "console"] = "json"
+    LOG_JSON_PRETTY: bool = False
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
-    def parse_cors_origins(cls, v: object) -> list[str] | str:
-        # 支持逗号分隔字符串或 JSON 数组
+    def parse_cors_origins(cls, v: object) -> list[str]:
         if v is None or v == "":
             return []
         if isinstance(v, str):
             s = v.strip()
             if s.startswith("[") and s.endswith("]"):
-                # 让 pydantic 继续解析 JSON
-                return s
+                return cast(list[str], __import__("json").loads(s))
             return [item.strip() for item in s.split(",") if item.strip()]
         if isinstance(v, Sequence) and not isinstance(v, (str, bytes)):
             items: Sequence[object] = cast(Sequence[object], v)
-            out: list[str] = []
-            for item in items:
-                s = str(item).strip()
-                if s:
-                    out.append(s)
-            return out
+            return [str(item).strip() for item in items if str(item).strip()]
         return []
 
     @field_validator("LOG_FORMAT", mode="before")
@@ -74,7 +58,7 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    # 基于环境变量的配置在运行时填充，此处对静态检查忽略缺少必填参数的告警
+    # fill config from environment variables at runtime, ignore missing required fields for static check
     return Settings()  # pyright: ignore[reportCallIssue]
 
 

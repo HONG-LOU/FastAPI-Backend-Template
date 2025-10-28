@@ -56,7 +56,6 @@ def create_access_token(
 
 
 def create_refresh_token(subject: str) -> dict[str, str]:
-    # 返回 token 与 jti，便于与数据库记录关联
     return _create_jwt_token(
         subject=subject,
         token_type="refresh",
@@ -69,19 +68,8 @@ class JWTClaims(BaseModel):
 
 
 def jwt_claims(token: str) -> JWTClaims:
-    """仅解析 JWT payload 不校验签名（用于提取 exp 等信息）。"""
-    from jose.utils import base64url_decode
-
-    parts = token.split(".")
-    if len(parts) != 3:
-        return JWTClaims()
     try:
-        payload = parts[1]
-        missing_padding = len(payload) % 4
-        if missing_padding:
-            payload += "=" * (4 - missing_padding)
-        return JWTClaims.model_validate_json(
-            base64url_decode(payload.encode()).decode()
-        )
+        claims: dict[str, Any] = jwt.get_unverified_claims(token)
+        return JWTClaims.model_validate(claims)
     except Exception:
         return JWTClaims()

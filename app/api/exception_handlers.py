@@ -4,11 +4,9 @@ from typing import Any
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
-from jose import JWTError
 from pydantic import BaseModel, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy.exc import SQLAlchemyError
-import asyncpg
 
 from app.core.context import get_request_id
 from app.core.exceptions import AppException
@@ -23,7 +21,7 @@ class ErrorResponse(BaseModel):
     code: str
     request_id: str | None = None
     data: Any | None = None
-    errors: list[dict[str, Any]] | None = None
+    errors: list[Any] | None = None
 
 
 def _error_response(
@@ -32,7 +30,7 @@ def _error_response(
     message: str,
     code: str,
     data: Any | None = None,
-    errors: list[dict[str, Any]] | None = None,
+    errors: list[Any] | None = None,
 ) -> JSONResponse:
     payload = ErrorResponse(
         message=message,
@@ -64,10 +62,6 @@ async def validation_exception_handler(request: Request, exc: ValidationError):
     )
 
 
-async def jwt_exception_handler(request: Request, exc: JWTError):
-    return _error_response(401, message="Invalid token", code="invalid_token")
-
-
 async def unhandled_exception_handler(request: Request, exc: Exception):
     logger.exception("Unhandled exception: %s", str(exc))
     return _error_response(500, message="Internal Server Error", code="internal_error")
@@ -78,7 +72,7 @@ async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
     return _error_response(503, message="Database error", code="database_error")
 
 
-async def asyncpg_exception_handler(request: Request, exc: asyncpg.PostgresError):
+async def asyncpg_exception_handler(request: Request, exc: Any):
     logger.exception("Postgres error: %s", str(exc))
     return _error_response(
         503, message="Database unavailable", code="database_unavailable"

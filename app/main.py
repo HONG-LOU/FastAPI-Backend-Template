@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from typing import cast
 from starlette.types import ExceptionHandler as StarletteExceptionHandler
+from starlette.middleware import Middleware
 
 from app.core.config import settings
 from app.api.routers.auth import router as auth_router
@@ -11,7 +12,6 @@ from app.api.exception_handlers import (
     http_exception_handler,
     app_exception_handler,
     validation_exception_handler,
-    jwt_exception_handler,
     unhandled_exception_handler,
     sqlalchemy_exception_handler,
     asyncpg_exception_handler,
@@ -24,11 +24,13 @@ from sqlalchemy.exc import SQLAlchemyError
 
 def create_app() -> FastAPI:
     configure_logging()
-    app = FastAPI(title=settings.APP_NAME)
+    app = FastAPI(
+        title=settings.APP_NAME,
+        middleware=[Middleware(RequestContextMiddleware)],
+    )
 
     # CORS
     if settings.BACKEND_CORS_ORIGINS:
-        # 支持通配：当为 ["*"] 时使用正则放通所有来源（兼容 allow_credentials=True）
         if settings.BACKEND_CORS_ORIGINS == ["*"]:
             app.add_middleware(
                 CORSMiddleware,
@@ -45,9 +47,6 @@ def create_app() -> FastAPI:
                 allow_methods=["*"],
                 allow_headers=["*"],
             )
-
-    # Middlewares
-    app.add_middleware(RequestContextMiddleware)
 
     # Routers
     app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
@@ -67,11 +66,6 @@ def create_app() -> FastAPI:
     app.add_exception_handler(
         RequestValidationError,
         cast(StarletteExceptionHandler, validation_exception_handler),
-    )
-    from jose import JWTError
-
-    app.add_exception_handler(
-        JWTError, cast(StarletteExceptionHandler, jwt_exception_handler)
     )
     app.add_exception_handler(
         Exception, cast(StarletteExceptionHandler, unhandled_exception_handler)

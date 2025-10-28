@@ -4,6 +4,24 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class WSMessage(BaseModel):
+    type: str
+
+
+class WSPresence(WSMessage):
+    room_id: int
+    user_id: int
+    status: str
+
+
+class WSChatMessage(WSMessage):
+    id: int
+    room_id: int
+    sender_id: int
+    content: str
+    created_at: datetime
+
+
 class MessageCreate(BaseModel):
     room_id: int
     content: str | None = Field(default=None, max_length=5000)

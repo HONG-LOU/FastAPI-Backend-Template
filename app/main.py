@@ -27,6 +27,10 @@ def create_app() -> FastAPI:
     configure_logging()
     app = FastAPI(
         title=settings.APP_NAME,
+        swagger_ui_parameters={
+            "tryItOutEnabled": True,
+            "defaultModelsExpandDepth": -1,
+        },
         middleware=[Middleware(RequestContextMiddleware)],
     )
 

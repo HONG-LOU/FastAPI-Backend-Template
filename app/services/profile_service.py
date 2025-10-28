@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Iterable
 
 from fastapi import UploadFile
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import and_, func, select, update, String
+from sqlalchemy.dialects.postgresql import array as pg_array, ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -172,7 +173,7 @@ async def search_by_skills_service(
     skills = [s.strip() for s in skills if s and s.strip()]
     if not skills:
         return []
-    # Postgres array contains-any
-    q = select(User).where(func.array_overlap(User.skills, skills)).limit(limit)
+    param = pg_array(skills, type_=ARRAY(String()))
+    q = select(User).where(User.skills.overlap(param)).limit(limit)
     rows = (await db.execute(q)).scalars().all()
     return [UserOut.model_validate(u, from_attributes=True) for u in rows]

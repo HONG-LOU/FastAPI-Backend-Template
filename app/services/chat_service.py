@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 from typing import Any, Awaitable, cast
+import asyncio
+import contextlib
 
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy import and_, desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
-from redis.asyncio.client import PubSub
+from app.services.ws_broker import get_broker, WebSocketConnection
+from app.core.metrics import inc
+from app.core.logging import get_logger
 
 from app.core.exceptions import BadRequest, Forbidden
-from app.core.redis import get_redis, publish_json
+from app.core.redis import get_redis, publish_model
 from app.db.session import AsyncSessionLocal
 from app.models.chat import ChatParticipant, ChatRoom, Message
 from app.models.user import User
@@ -20,7 +24,16 @@ from app.schemas.chat import (
     RoomCreateDirect,
     RoomOut,
     UnreadCountOut,
+    WSPresence,
+    WSChatMessage,
 )
+
+
+UNREAD_TTL_SECONDS = 7 * 24 * 3600
+
+
+def _unread_key(room_id: int, user_id: int) -> str:
+    return f"chat:unread:{room_id}:{user_id}"
 
 
 async def create_direct_room_service(
@@ -109,23 +122,49 @@ async def send_message_service(
     await db.commit()
     await db.refresh(msg)
 
-    await publish_json(
+    await publish_model(
         f"chat:room:{payload.room_id}",
-        {
-            "type": "message",
-            "id": msg.id,
-            "room_id": msg.room_id,
-            "sender_id": msg.sender_id,
-            "content": msg.content,
-            "created_at": msg.created_at.isoformat(),
-        },
+        WSChatMessage(
+            type="message",
+            id=msg.id,
+            room_id=msg.room_id,
+            sender_id=msg.sender_id,
+            content=msg.content or "",
+            created_at=msg.created_at,
+        ),
     )
+
+    redis = await get_redis()
+    participants = (
+        (
+            await db.execute(
+                select(ChatParticipant.user_id).where(
+                    and_(
+                        ChatParticipant.room_id == payload.room_id,
+                        ChatParticipant.user_id != current_user_id,
+                    )
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if participants:
+        pipe = redis.pipeline(transaction=False)
+        for uid in participants:
+            key = _unread_key(payload.room_id, int(uid))
+            pipe.set(key, b"0", ex=UNREAD_TTL_SECONDS, nx=True)
+            pipe.incr(key)
+        try:
+            await cast(Awaitable[Any], pipe.execute())
+        except Exception:
+            pass
     return MessageOut.model_validate(msg, from_attributes=True)
 
 
 async def mark_read_service(
     db: AsyncSession, room_id: int, body: MarkReadIn, current_user_id: int
-) -> dict[str, bool]:
+) -> "AckOut":
     exists = await db.execute(
         select(ChatParticipant).where(
             and_(
@@ -150,21 +189,46 @@ async def mark_read_service(
     )
     await db.commit()
 
-    await publish_json(
+    await publish_model(
         f"chat:room:{room_id}",
-        {
-            "type": "message_read",
-            "room_id": room_id,
-            "user_id": current_user_id,
-            "last_read_message_id": body.last_read_message_id,
-        },
+        WSPresence(
+            type="message_read",
+            room_id=room_id,
+            user_id=current_user_id,
+            status=str(body.last_read_message_id),
+        ),
     )
-    return {"ok": True}
+    try:
+        redis = await get_redis()
+        await cast(
+            Awaitable[Any],
+            redis.set(
+                _unread_key(room_id, current_user_id), b"0", ex=UNREAD_TTL_SECONDS
+            ),
+        )
+    except Exception:
+        pass
+    from app.schemas.common import AckOut
+
+    return AckOut(ok=True)
 
 
 async def unread_count_service(
     db: AsyncSession, room_id: int, current_user_id: int
 ) -> UnreadCountOut:
+    try:
+        redis = await get_redis()
+        val = await cast(
+            Awaitable[Any], redis.get(_unread_key(room_id, current_user_id))
+        )
+        if val is not None:
+            try:
+                return UnreadCountOut(count=int(val))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     result = await db.execute(
         select(ChatParticipant).where(
             and_(
@@ -192,6 +256,19 @@ async def unread_count_service(
             )
         )
     ).scalar_one()
+
+    try:
+        redis = await get_redis()
+        await cast(
+            Awaitable[Any],
+            redis.set(
+                _unread_key(room_id, current_user_id),
+                str(int(cnt)).encode(),
+                ex=UNREAD_TTL_SECONDS,
+            ),
+        )
+    except Exception:
+        pass
     return UnreadCountOut(count=int(cnt))
 
 
@@ -263,54 +340,69 @@ async def ws_handler(ws: WebSocket) -> None:
         return
 
     await ws.accept()
+    logger = get_logger("app.ws")
+    logger.info("ws connected", extra={"room_id": room_id, "user_id": user.id})
 
     redis = await get_redis()
-    pubsub: PubSub = redis.pubsub()
+    broker = await get_broker()
     channel = f"chat:room:{room_id}"
-    online_set = f"chat:room:{room_id}:online"
+    presence_key = f"chat:room:{room_id}:presence:{user.id}"
 
-    try:
-        await cast(Awaitable[Any], redis.sadd(online_set, str(user.id)))
-        await publish_json(
-            channel,
-            {
-                "type": "presence",
-                "room_id": room_id,
-                "user_id": user.id,
-                "status": "online",
-            },
-        )
-
-        await cast(Awaitable[Any], pubsub.subscribe(channel))
+    async def _heartbeat_task() -> None:
         try:
             while True:
-                message = await cast(
-                    Awaitable[dict[str, Any] | None],
-                    pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0),
-                )
-                if message and message.get("type") == "message":
-                    data = message.get("data")
-                    if isinstance(data, (bytes, bytearray)):
-                        await ws.send_bytes(bytes(data))
-                    else:
-                        await ws.send_json(data)
-        finally:
-            await cast(Awaitable[Any], pubsub.unsubscribe(channel))
-            await cast(Awaitable[Any], pubsub.close())
-    except WebSocketDisconnect:
-        pass
+                await cast(Awaitable[Any], redis.set(presence_key, b"1", ex=30))
+                await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            pass
+
+    hb_task = asyncio.create_task(_heartbeat_task())
+    await publish_model(
+        channel,
+        WSPresence(type="presence", room_id=room_id, user_id=user.id, status="online"),
+    )
+    inc("ws_presence_online")
+
+    conn = WebSocketConnection(ws)
+    await broker.subscribe(room_id, conn)
+    try:
+        last = 0.0
+        tokens = 5.0
+        rate = 5.0
+        cap = 10.0
+        while True:
+            try:
+                _ = await ws.receive_text()
+                now = asyncio.get_event_loop().time()
+                if last:
+                    tokens = min(cap, tokens + (now - last) * rate)
+                last = now
+                if tokens < 1.0:
+                    await asyncio.sleep(0.1)
+                    continue
+                tokens -= 1.0
+            except WebSocketDisconnect:
+                break
+            except Exception:
+                await asyncio.sleep(0.05)
     finally:
         try:
-            await cast(Awaitable[Any], redis.srem(online_set, str(user.id)))
-            await publish_json(
+            hb_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await hb_task
+            await broker.unsubscribe(room_id, conn)
+            await cast(Awaitable[Any], redis.delete(presence_key))
+            await publish_model(
                 channel,
-                {
-                    "type": "presence",
-                    "room_id": room_id,
-                    "user_id": user.id,
-                    "status": "offline",
-                },
+                WSPresence(
+                    type="presence", room_id=room_id, user_id=user.id, status="offline"
+                ),
+            )
+            inc("ws_presence_offline")
+            logger.info(
+                "ws disconnected", extra={"room_id": room_id, "user_id": user.id}
             )
         except Exception:
-            # 忽略清理阶段的异常
             pass

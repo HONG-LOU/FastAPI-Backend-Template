@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query, WebSocket
 
 from app.api.deps import DBSession, get_current_user
 from app.models.user import User
+from app.schemas.common import AckOut
 from app.schemas.chat import (
     MarkReadIn,
     MessageCreate,
@@ -51,13 +52,13 @@ async def send_message(
     return await send_message_service(db, payload, user.id)
 
 
-@router.post("/rooms/{room_id}/read")
+@router.post("/rooms/{room_id}/read", response_model=AckOut)
 async def mark_read(
     room_id: int,
     body: MarkReadIn,
     db: DBSession,
     user: User = Depends(get_current_user),
-) -> dict[str, bool]:
+) -> "AckOut":
     return await mark_read_service(db, room_id, body, user.id)
 
 

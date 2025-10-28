@@ -1,7 +1,5 @@
 from datetime import datetime
-from typing import Any
-
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, computed_field
 
 
 class UserCreate(BaseModel):
@@ -17,10 +15,9 @@ class UserOut(BaseModel):
     phone: str | None = None
     location: str | None = None
     avatar_path: str | None = Field(default=None, exclude=True)
-    avatar_url: str | None = Field(default=None)
     intro: str | None = None
-    links: list[str] = []
-    skills: list[str] = []
+    links: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -28,9 +25,10 @@ class UserOut(BaseModel):
         "from_attributes": True,
     }
 
-    def model_post_init(self, __context: Any) -> None:
-        if self.avatar_path and not self.avatar_url:
-            object.__setattr__(self, "avatar_url", self.avatar_path)
+    @computed_field  # type: ignore[misc]
+    @property
+    def avatar_url(self) -> str | None:
+        return self.avatar_path
 
 
 class UserUpdate(BaseModel):

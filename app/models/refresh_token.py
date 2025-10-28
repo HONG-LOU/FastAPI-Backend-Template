@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, Boolean, func
+from sqlalchemy import ForeignKey, String, Boolean, func, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -15,5 +15,7 @@ class RefreshToken(Base):
     )
     jti: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(default=func.now())
-    expires_at: Mapped[datetime] = mapped_column(index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

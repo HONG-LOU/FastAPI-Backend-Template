@@ -4,7 +4,8 @@ import asyncio
 import logging
 import time
 from functools import wraps
-from typing import Any, Awaitable, Callable, TypeVar, cast
+from typing import Any, TypeVar, cast
+from collections.abc import Awaitable, Callable
 
 from app.core.context import get_request_id
 

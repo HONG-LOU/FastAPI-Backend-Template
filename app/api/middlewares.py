@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Callable, Awaitable
+from collections.abc import Callable, Awaitable
 
 from fastapi import Request
 from starlette.responses import Response

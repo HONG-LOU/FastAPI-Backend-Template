@@ -1,12 +1,12 @@
 from datetime import datetime
-from typing import Optional
+
 
 from pydantic import BaseModel, Field
 
 
 class MessageCreate(BaseModel):
     room_id: int
-    content: Optional[str] = Field(default=None, max_length=5000)
+    content: str | None = Field(default=None, max_length=5000)
 
 
 class MessageOut(BaseModel):
@@ -14,7 +14,7 @@ class MessageOut(BaseModel):
     room_id: int
     sender_id: int
     kind: str
-    content: Optional[str]
+    content: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}

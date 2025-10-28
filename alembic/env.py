@@ -4,7 +4,6 @@ from logging.config import fileConfig
 import os
 import sys
 
-# 将项目根目录加入 sys.path，便于在 alembic 环境中导入 app 包
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
@@ -16,14 +15,12 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 from app.db.base import Base
-from app.models import user, refresh_token  # noqa: F401  # 导入以便元数据可见
-from app.models import chat, attachment  # noqa: F401  # 让 Alembic 看到新表
 from app.core.config import settings
 
 
 config = context.config
 
-fileConfig(config.config_file_name)
+fileConfig(config.config_file_name)  # type: ignore
 
 target_metadata = Base.metadata
 

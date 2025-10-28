@@ -1,9 +1,10 @@
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 from uuid import uuid4
 
 from jose import jwt
 from passlib.context import CryptContext
+from pydantic import BaseModel
 
 from app.core.config import settings
 
@@ -23,12 +24,12 @@ def _create_jwt_token(
     subject: str,
     token_type: str,
     expires_minutes: int,
-    extra_claims: Optional[Dict[str, Any]] = None,
-) -> Dict[str, str]:
+    extra_claims: dict[str, Any] | None = None,
+) -> dict[str, str]:
     now = datetime.now(timezone.utc)
     expire = now + timedelta(minutes=expires_minutes)
     jti = uuid4().hex
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "sub": subject,
         "type": token_type,
         "jti": jti,
@@ -44,7 +45,7 @@ def _create_jwt_token(
 
 
 def create_access_token(
-    subject: str, extra_claims: Optional[Dict[str, Any]] = None
+    subject: str, extra_claims: dict[str, Any] | None = None
 ) -> str:
     return _create_jwt_token(
         subject=subject,
@@ -54,10 +55,33 @@ def create_access_token(
     )["token"]
 
 
-def create_refresh_token(subject: str) -> Dict[str, str]:
+def create_refresh_token(subject: str) -> dict[str, str]:
     # 返回 token 与 jti，便于与数据库记录关联
     return _create_jwt_token(
         subject=subject,
         token_type="refresh",
         expires_minutes=settings.REFRESH_TOKEN_EXPIRE_MINUTES,
     )
+
+
+class JWTClaims(BaseModel):
+    exp: int | None = None
+
+
+def jwt_claims(token: str) -> JWTClaims:
+    """仅解析 JWT payload 不校验签名（用于提取 exp 等信息）。"""
+    from jose.utils import base64url_decode
+
+    parts = token.split(".")
+    if len(parts) != 3:
+        return JWTClaims()
+    try:
+        payload = parts[1]
+        missing_padding = len(payload) % 4
+        if missing_padding:
+            payload += "=" * (4 - missing_padding)
+        return JWTClaims.model_validate_json(
+            base64url_decode(payload.encode()).decode()
+        )
+    except Exception:
+        return JWTClaims()

@@ -21,6 +21,7 @@ dependencies = [
   "email-validator>=2.1.0.post1",
   "redis>=5.0.1",
   "black>=25.9.0",
+  "colorama>=0.4.6",
 ]
 
 [tool.uv]

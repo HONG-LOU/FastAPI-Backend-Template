@@ -54,9 +54,12 @@ def upgrade() -> None:
             "revoked", sa.Boolean(), nullable=False, server_default=sa.text("false")
         ),
         sa.Column(
-            "created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
         ),
-        sa.Column("expires_at", sa.DateTime(), nullable=False),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )

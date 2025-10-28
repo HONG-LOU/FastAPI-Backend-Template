@@ -1,5 +1,6 @@
 from functools import lru_cache
-from typing import List, Sequence, cast
+from typing import cast
+from collections.abc import Sequence
 
 from pydantic import Field
 from pydantic import field_validator
@@ -28,7 +29,7 @@ class Settings(BaseSettings):
         default="redis://localhost:6379/0", description="Redis 连接 URL"
     )
 
-    BACKEND_CORS_ORIGINS: List[str] = Field(default_factory=list)
+    BACKEND_CORS_ORIGINS: list[str] = Field(default_factory=list)
 
     # Logging
     LOG_LEVEL: str = Field(
@@ -41,7 +42,7 @@ class Settings(BaseSettings):
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
-    def parse_cors_origins(cls, v: object) -> List[str] | str:
+    def parse_cors_origins(cls, v: object) -> list[str] | str:
         # 支持逗号分隔字符串或 JSON 数组
         if v is None or v == "":
             return []
@@ -53,7 +54,7 @@ class Settings(BaseSettings):
             return [item.strip() for item in s.split(",") if item.strip()]
         if isinstance(v, Sequence) and not isinstance(v, (str, bytes)):
             items: Sequence[object] = cast(Sequence[object], v)
-            out: List[str] = []
+            out: list[str] = []
             for item in items:
                 s = str(item).strip()
                 if s:

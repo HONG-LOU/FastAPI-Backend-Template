@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from jose import JWTError
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from sqlalchemy.exc import SQLAlchemyError
+import asyncpg
 
 from app.core.context import get_request_id
 from app.core.exceptions import AppException
@@ -16,17 +18,34 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _base_payload(message: str, code: str) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {"message": message, "code": code}
-    rid = get_request_id()
-    if rid:
-        payload["request_id"] = rid
-    return payload
+class ErrorResponse(BaseModel):
+    message: str
+    code: str
+    request_id: str | None = None
+    data: Any | None = None
+    errors: list[dict[str, Any]] | None = None
+
+
+def _error_response(
+    status_code: int,
+    *,
+    message: str,
+    code: str,
+    data: Any | None = None,
+    errors: list[dict[str, Any]] | None = None,
+) -> JSONResponse:
+    payload = ErrorResponse(
+        message=message,
+        code=code,
+        request_id=get_request_id(),
+        data=data,
+        errors=errors,
+    ).model_dump(exclude_none=True)
+    return JSONResponse(status_code=status_code, content=payload)
 
 
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    payload = _base_payload(str(exc.detail), "http_error")
-    return JSONResponse(status_code=exc.status_code, content=payload)
+    return _error_response(exc.status_code, message=str(exc.detail), code="http_error")
 
 
 async def app_exception_handler(request: Request, exc: AppException):
@@ -34,24 +53,33 @@ async def app_exception_handler(request: Request, exc: AppException):
         logger.exception("AppException: %s", exc.message)
     else:
         logger.warning("AppException: %s", exc.message)
-    payload = _base_payload(exc.message, exc.code)
-    if exc.data is not None:
-        payload["data"] = exc.data
-    return JSONResponse(status_code=exc.status_code, content=payload)
+    return _error_response(
+        exc.status_code, message=exc.message, code=exc.code, data=exc.data
+    )
 
 
 async def validation_exception_handler(request: Request, exc: ValidationError):
-    payload = _base_payload("Validation error", "validation_error")
-    payload["errors"] = exc.errors()
-    return JSONResponse(status_code=422, content=payload)
+    return _error_response(
+        422, message="Validation error", code="validation_error", errors=exc.errors()
+    )
 
 
 async def jwt_exception_handler(request: Request, exc: JWTError):
-    payload = _base_payload("Invalid token", "invalid_token")
-    return JSONResponse(status_code=401, content=payload)
+    return _error_response(401, message="Invalid token", code="invalid_token")
 
 
 async def unhandled_exception_handler(request: Request, exc: Exception):
     logger.exception("Unhandled exception: %s", str(exc))
-    payload = _base_payload("Internal Server Error", "internal_error")
-    return JSONResponse(status_code=500, content=payload)
+    return _error_response(500, message="Internal Server Error", code="internal_error")
+
+
+async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
+    logger.exception("SQLAlchemy error: %s", str(exc))
+    return _error_response(503, message="Database error", code="database_error")
+
+
+async def asyncpg_exception_handler(request: Request, exc: asyncpg.PostgresError):
+    logger.exception("Postgres error: %s", str(exc))
+    return _error_response(
+        503, message="Database unavailable", code="database_unavailable"
+    )

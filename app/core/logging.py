@@ -5,7 +5,7 @@ import logging
 import os
 import sys
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, cast
+from typing import Any, cast
 
 from app.core.config import settings
 from app.core.context import get_request_id
@@ -25,7 +25,7 @@ ANSI_COLORS = {
 
 class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:  # type: ignore[override]
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
@@ -38,8 +38,8 @@ class JSONFormatter(logging.Formatter):
             data["exc_info"] = self.formatException(record.exc_info)
         extras_obj = getattr(record, "ipdn_extra", None)
         if isinstance(extras_obj, dict):
-            extras_any: Dict[Any, Any] = cast(Dict[Any, Any], extras_obj)
-            extras_typed: Dict[str, Any] = {str(k): v for k, v in extras_any.items()}
+            extras_any: dict[Any, Any] = cast(dict[Any, Any], extras_obj)
+            extras_typed: dict[str, Any] = {str(k): v for k, v in extras_any.items()}
             data.update(extras_typed)
         indent = 2 if settings.LOG_JSON_PRETTY else None
         return json.dumps(
@@ -52,10 +52,8 @@ class ColorConsoleFormatter(logging.Formatter):
         super().__init__(fmt="%(message)s")
 
     def _supports_color(self) -> bool:
-        # 简单判断：Windows 10+ PowerShell/Terminal 和类 Unix 终端一般都支持 ANSI
-        return sys.stdout.isatty() and (
-            os.name != "nt" or "WT_SESSION" in os.environ or "ANSICON" in os.environ
-        )
+        # 只要是交互式终端就启用颜色；在 Windows 下由 colorama 负责转换
+        return sys.stdout.isatty()
 
     def format(self, record: logging.LogRecord) -> str:  # type: ignore[override]
         rid = get_request_id()
@@ -81,8 +79,8 @@ class ColorConsoleFormatter(logging.Formatter):
         # 合并用户 extra 字段
         extras_obj = getattr(record, "ipdn_extra", None)
         if isinstance(extras_obj, dict):
-            extras_any: Dict[Any, Any] = cast(Dict[Any, Any], extras_obj)
-            extras_typed: Dict[str, Any] = {str(k): v for k, v in extras_any.items()}
+            extras_any: dict[Any, Any] = cast(dict[Any, Any], extras_obj)
+            extras_typed: dict[str, Any] = {str(k): v for k, v in extras_any.items()}
             extras_list: list[str] = []
             for k, v in extras_typed.items():
                 extras_list.append(f"{k}={v}")
@@ -97,18 +95,18 @@ class ColorConsoleFormatter(logging.Formatter):
 
 class ContextLoggerAdapter(logging.LoggerAdapter[logging.Logger]):
     def __init__(
-        self, logger: logging.Logger, extra: Optional[Dict[str, Any]] = None
+        self, logger: logging.Logger, extra: dict[str, Any] | None = None
     ) -> None:
         super().__init__(logger, extra or {})
 
-    def process(self, msg: Any, kwargs: Dict[str, Any]):  # type: ignore[override]
+    def process(self, msg: Any, kwargs: dict[str, Any]):  # type: ignore[override]
         fields = kwargs.pop("extra", None)
         if fields is None:
             fields = {}
         # 基础 extra 来自 adapter
-        base_extra: Dict[str, Any] = cast(Dict[str, Any], dict(self.extra or {}))
+        base_extra: dict[str, Any] = cast(dict[str, Any], dict(self.extra or {}))
         if fields:
-            merged_fields: Dict[str, Any] = {**base_extra, **fields}
+            merged_fields: dict[str, Any] = {**base_extra, **fields}
         else:
             merged_fields = base_extra
         # 嵌入到 record.ipdn_extra，便于 JSONFormatter/ColorConsoleFormatter 统一处理
@@ -116,12 +114,12 @@ class ContextLoggerAdapter(logging.LoggerAdapter[logging.Logger]):
         return msg, kwargs
 
     def with_fields(self, **fields: Any) -> "ContextLoggerAdapter":
-        base_extra: Dict[str, Any] = cast(Dict[str, Any], dict(self.extra or {}))
-        merged: Dict[str, Any] = {**base_extra, **fields}
+        base_extra: dict[str, Any] = cast(dict[str, Any], dict(self.extra or {}))
+        merged: dict[str, Any] = {**base_extra, **fields}
         return ContextLoggerAdapter(self.logger, merged)
 
 
-def get_logger(name: Optional[str] = None) -> ContextLoggerAdapter:
+def get_logger(name: str | None = None) -> ContextLoggerAdapter:
     base = logging.getLogger(name if name else __name__)
     return ContextLoggerAdapter(base)
 
@@ -146,6 +144,15 @@ def _hook_uvicorn(level: int) -> None:
 
 
 def configure_logging() -> None:
+    # 在 Windows 上启用 ANSI 转换，确保 PowerShell/cmd 也能显示颜色
+    if os.name == "nt":
+        try:
+            import colorama  # type: ignore[reportMissingTypeStubs]
+
+            # convert=True: 将 ANSI 转为 Win32 调用；strip=False: 保留 ANSI 给支持的终端
+            colorama.init(convert=True, strip=False)
+        except Exception:
+            pass
     root = logging.getLogger()
     for h in list(root.handlers):
         root.removeHandler(h)

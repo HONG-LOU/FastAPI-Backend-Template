@@ -13,10 +13,13 @@ from app.api.exception_handlers import (
     validation_exception_handler,
     jwt_exception_handler,
     unhandled_exception_handler,
+    sqlalchemy_exception_handler,
+    asyncpg_exception_handler,
 )
 from app.core.exceptions import AppException
 from app.api.middlewares import RequestContextMiddleware
 from app.core.logging import configure_logging
+from sqlalchemy.exc import SQLAlchemyError
 
 
 def create_app() -> FastAPI:
@@ -73,6 +76,18 @@ def create_app() -> FastAPI:
     app.add_exception_handler(
         Exception, cast(StarletteExceptionHandler, unhandled_exception_handler)
     )
+    app.add_exception_handler(
+        SQLAlchemyError, cast(StarletteExceptionHandler, sqlalchemy_exception_handler)
+    )
+    try:
+        import asyncpg as _asyncpg  # type: ignore[reportMissingTypeStubs]
+
+        app.add_exception_handler(
+            _asyncpg.PostgresError,
+            cast(StarletteExceptionHandler, asyncpg_exception_handler),
+        )
+    except Exception:
+        pass
     return app
 
 

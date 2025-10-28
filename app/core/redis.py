@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Optional, Callable, Awaitable, cast
+from typing import Any, cast
+from collections.abc import Callable, Awaitable
 
 from redis.asyncio import Redis
 
 from app.core.config import settings
 
 
-_redis: Optional[Redis] = None
+_redis: Redis | None = None
 
 
 async def get_redis() -> Redis:

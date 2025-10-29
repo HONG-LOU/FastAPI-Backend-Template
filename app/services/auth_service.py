@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 
 from jose import jwt
 from jose import JWTError
@@ -12,28 +13,47 @@ from app.core.exceptions import BadRequest, Conflict, Unauthorized
 from app.core.security import (
     create_access_token,
     create_refresh_token,
+    create_verify_token,
     get_password_hash,
     jwt_claims,
+    verify_token,
     verify_password,
 )
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
 from app.schemas.auth import LoginIn, TokenPair
 from app.schemas.user import UserCreate, UserOut
+from app.services.mailer import send_mail
+from app.schemas.common import AckOut
+from app.core.redis import get_redis
 
 
-async def register_user(db: AsyncSession, user_in: UserCreate) -> UserOut:
+async def register_user(db: AsyncSession, user_in: UserCreate) -> AckOut:
     exists = await db.execute(select(User).where(User.email == user_in.email))
     if exists.scalar_one_or_none() is not None:
         raise Conflict("Email already registered")
 
-    user = User(
-        email=user_in.email, hashed_password=get_password_hash(user_in.password)
+    hashed = get_password_hash(user_in.password)
+    token = create_verify_token(subject=user_in.email)
+    claims = jwt_claims(token)
+    if not claims.jti:
+        raise BadRequest("Failed to initiate registration")
+
+    redis = await get_redis()
+    key = f"reg:{claims.jti}"
+    data = json.dumps({"email": user_in.email, "hashed_password": hashed}).encode()
+    ttl = settings.VERIFY_TOKEN_EXPIRE_MINUTES * 60
+    await redis.set(key, data, ex=ttl)
+
+    verify_url = f"{settings.BACKEND_PUBLIC_BASE_URL}/api/auth/verify?token={token}"
+    html = (
+        f"<h3>欢迎注册</h3>"
+        f"<p>请点击下方按钮完成邮箱验证：</p>"
+        f"<p><a href='{verify_url}' style='padding:10px 16px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:6px'>验证邮箱</a></p>"
     )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return UserOut.model_validate(user)
+    await send_mail(user_in.email, "注册验证", html)
+
+    return AckOut(ok=True)
 
 
 async def login_user(db: AsyncSession, payload: LoginIn) -> TokenPair:
@@ -96,9 +116,7 @@ async def rotate_refresh_token(db: AsyncSession, token_pair: TokenPair) -> Token
     return TokenPair(access_token=access_token, refresh_token=new_refresh["token"])
 
 
-async def revoke_refresh_token(
-    db: AsyncSession, token_pair: TokenPair
-) -> dict[str, bool]:
+async def revoke_refresh_token(db: AsyncSession, token_pair: TokenPair) -> AckOut:
     try:
         payload = jwt.decode(
             token_pair.refresh_token,
@@ -116,4 +134,59 @@ async def revoke_refresh_token(
         update(RefreshToken).where(RefreshToken.jti == jti).values(revoked=True)
     )
     await db.commit()
-    return {"ok": True}
+    return AckOut(ok=True)
+
+
+async def verify_email_and_issue_tokens(db: AsyncSession, token: str) -> TokenPair:
+    try:
+        claims = verify_token(token, expected_type="verify")
+    except Exception:
+        raise Unauthorized("Invalid verification token")
+
+    if not claims.sub:
+        raise Unauthorized("Invalid verification token")
+
+    result = await db.execute(select(User).where(User.email == claims.sub))
+    user = result.scalar_one_or_none()
+    if user is None:
+        # lazy create from pending registration
+        if not claims.jti:
+            raise Unauthorized("Invalid verification token")
+        redis = await get_redis()
+        key = f"reg:{claims.jti}"
+        raw = await redis.get(key)
+        if not raw:
+            raise Unauthorized("Registration expired or invalid")
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            raise Unauthorized("Invalid registration payload")
+        email = payload.get("email")
+        hashed_password = payload.get("hashed_password")
+        if email != claims.sub or not hashed_password:
+            raise Unauthorized("Invalid registration payload")
+
+        user = User(email=email, hashed_password=hashed_password)
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        try:
+            await redis.delete(key)
+        except Exception:
+            pass
+
+    if not user.email_verified:
+        user.email_verified = True
+        await db.commit()
+
+    access_token = create_access_token(subject=user.email)
+    refresh = create_refresh_token(subject=user.email)
+    rc = jwt_claims(refresh["token"])
+    row = RefreshToken(
+        user_id=user.id,
+        jti=refresh["jti"],
+        expires_at=datetime.fromtimestamp(int(rc.exp or 0), tz=timezone.utc),
+    )
+    db.add(row)
+    await db.commit()
+    return TokenPair(access_token=access_token, refresh_token=refresh["token"])

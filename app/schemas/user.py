@@ -11,6 +11,7 @@ class UserOut(BaseModel):
     id: int
     email: EmailStr
     is_active: bool
+    email_verified: bool
     name: str | None = None
     phone: str | None = None
     location: str | None = None

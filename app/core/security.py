@@ -63,8 +63,19 @@ def create_refresh_token(subject: str) -> dict[str, str]:
     )
 
 
+def create_verify_token(subject: str) -> str:
+    return _create_jwt_token(
+        subject=subject,
+        token_type="verify",
+        expires_minutes=settings.VERIFY_TOKEN_EXPIRE_MINUTES,
+    )["token"]
+
+
 class JWTClaims(BaseModel):
     exp: int | None = None
+    sub: str | None = None
+    type: str | None = None
+    jti: str | None = None
 
 
 def jwt_claims(token: str) -> JWTClaims:
@@ -73,3 +84,13 @@ def jwt_claims(token: str) -> JWTClaims:
         return JWTClaims.model_validate(claims)
     except Exception:
         return JWTClaims()
+
+
+def verify_token(token: str, *, expected_type: str | None = None) -> JWTClaims:
+    claims: dict[str, Any] = jwt.decode(
+        token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+    )
+    data = JWTClaims.model_validate(claims)
+    if expected_type and data.type != expected_type:
+        raise ValueError("Invalid token type")
+    return data

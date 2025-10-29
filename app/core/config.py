@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
+    VERIFY_TOKEN_EXPIRE_MINUTES: int = 60 * 24
 
     DATABASE_URL: str
 
@@ -25,6 +26,18 @@ class Settings(BaseSettings):
     REDIS_URL: str
 
     BACKEND_CORS_ORIGINS: list[str] = []
+
+    # Public URLs
+    FRONTEND_BASE_URL: str = "http://localhost:5173"
+    BACKEND_PUBLIC_BASE_URL: str = "http://localhost:8000"
+
+    # Mail
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int | None = None
+    SMTP_USERNAME: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_STARTTLS: bool = True
+    MAIL_FROM: str | None = None
 
     # Logging
     LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"

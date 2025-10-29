@@ -23,6 +23,7 @@ dependencies = [
   "python-multipart>=0.0.9",
   "black>=25.9.0",
   "colorama>=0.4.6",
+  "aiosmtplib>=3.0.2",
 ]
 
 [tool.uv]

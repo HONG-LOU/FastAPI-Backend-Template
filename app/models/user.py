@@ -15,6 +15,7 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     name: Mapped[str | None] = mapped_column(String(127))
     phone: Mapped[str | None] = mapped_column(String(31))
     location: Mapped[str | None] = mapped_column(String(127), index=True)

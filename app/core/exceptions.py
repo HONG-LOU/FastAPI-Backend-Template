@@ -74,3 +74,14 @@ class Conflict(AppException):
         data: Any | None = None,
     ) -> None:
         super().__init__(message, code=code, status_code=409, data=data)
+
+
+class ServiceUnavailable(AppException):
+    def __init__(
+        self,
+        message: str = "Service Unavailable",
+        *,
+        code: str = "service_unavailable",
+        data: Any | None = None,
+    ) -> None:
+        super().__init__(message, code=code, status_code=503, data=data)

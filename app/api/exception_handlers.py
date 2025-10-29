@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence, cast
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -16,9 +16,28 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _jsonable(obj: Any) -> Any:
+    if isinstance(obj, Exception):
+        return str(obj)
+    try:
+        from pydantic import BaseModel as _BM  # type: ignore
+
+        if isinstance(obj, _BM):
+            return obj.model_dump(exclude_none=True)
+    except Exception:
+        pass
+    if isinstance(obj, (list, tuple, set)):
+        seq = cast(Sequence[Any], obj)
+        return [_jsonable(x) for x in seq]
+    if isinstance(obj, dict):
+        d = cast(dict[str, Any], obj)
+        return {k: _jsonable(v) for k, v in d.items()}
+    return obj
+
+
 class ErrorResponse(BaseModel):
     message: str
-    code: str
+    code: int
     request_id: str | None = None
     data: Any | None = None
     errors: list[Any] | None = None
@@ -28,7 +47,7 @@ def _error_response(
     status_code: int,
     *,
     message: str,
-    code: str,
+    code: int,
     data: Any | None = None,
     errors: list[Any] | None = None,
 ) -> JSONResponse:
@@ -36,44 +55,43 @@ def _error_response(
         message=message,
         code=code,
         request_id=get_request_id(),
-        data=data,
-        errors=errors,
+        data=_jsonable(data) if data is not None else None,
+        errors=_jsonable(errors) if errors is not None else None,
     ).model_dump(exclude_none=True)
     return JSONResponse(status_code=status_code, content=payload)
 
 
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    return _error_response(exc.status_code, message=str(exc.detail), code="http_error")
+    return _error_response(
+        exc.status_code, message=str(exc.detail), code=10000 + exc.status_code
+    )
 
 
 async def app_exception_handler(request: Request, exc: AppException):
     if exc.status_code >= 500:
-        logger.exception("AppException: %s", exc.message)
+        logger.exception("AppException[%s]: %s", exc.code, exc.message)
     else:
-        logger.warning("AppException: %s", exc.message)
+        logger.warning("AppException[%s]: %s", exc.code, exc.message)
     return _error_response(
         exc.status_code, message=exc.message, code=exc.code, data=exc.data
     )
 
 
 async def validation_exception_handler(request: Request, exc: ValidationError):
-    return _error_response(
-        422, message="Validation error", code="validation_error", errors=exc.errors()
-    )
+    errs = _jsonable(exc.errors())
+    return _error_response(422, message="Validation error", code=11001, errors=errs)
 
 
 async def unhandled_exception_handler(request: Request, exc: Exception):
     logger.exception("Unhandled exception: %s", str(exc))
-    return _error_response(500, message="Internal Server Error", code="internal_error")
+    return _error_response(500, message="Internal Server Error", code=19000)
 
 
 async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
     logger.exception("SQLAlchemy error: %s", str(exc))
-    return _error_response(503, message="Database error", code="database_error")
+    return _error_response(503, message="Database error", code=12001)
 
 
 async def asyncpg_exception_handler(request: Request, exc: Any):
     logger.exception("Postgres error: %s", str(exc))
-    return _error_response(
-        503, message="Database unavailable", code="database_unavailable"
-    )
+    return _error_response(503, message="Database unavailable", code=12002)

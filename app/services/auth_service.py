@@ -9,9 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import (
-    BadRequest,
-    Conflict,
-    Unauthorized,
+    RegistrationError,
+    CredentialsInvalid,
+    TokenInvalid,
+    TokenRevoked,
+    TokenTypeMismatch,
+    TokenMalformed,
+    VerificationInvalid,
+    VerificationExpired,
 )
 from app.core.security import (
     create_access_token,
@@ -24,7 +29,14 @@ from app.core.security import (
 )
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
-from app.schemas.auth import LoginIn, TokenPair, PendingRegistration
+from app.schemas.auth import (
+    LoginIn,
+    TokenPair,
+    PendingRegistration,
+    RegistrationErrorData,
+    TokenErrorData,
+    VerificationErrorData,
+)
 from app.schemas.user import UserCreate
 from app.services.mailer import send_mail
 from app.schemas.common import AckOut
@@ -32,15 +44,41 @@ from app.core.redis import get_redis
 
 
 async def register_user(db: AsyncSession, user_in: UserCreate) -> AckOut:
+    pwd = user_in.password.get_secret_value()
+    if (
+        len(pwd) < 8
+        or not any(c.isdigit() for c in pwd)
+        or not any(not c.isalnum() for c in pwd)
+    ):
+        raise RegistrationError(
+            "Weak password",
+            code=20004,
+            status_code=400,
+            data=RegistrationErrorData(
+                field="password",
+                reason="weak_password",
+                hint="At least 8 characters, including at least one number and one non-alphanumeric character",
+            ),
+        )
+
     exists = await db.execute(select(User).where(User.email == user_in.email))
     if exists.scalar_one_or_none() is not None:
-        raise Conflict("Email already registered")
+        raise RegistrationError(
+            "Email already registered",
+            code=20002,
+            status_code=409,
+            data=RegistrationErrorData(field="email", reason="email_taken"),
+        )
 
-    hashed = get_password_hash(user_in.password)
+    hashed = get_password_hash(user_in.password.get_secret_value())
     token = create_verify_token(subject=user_in.email)
     claims = jwt_claims(token)
     if not claims.jti:
-        raise BadRequest("Failed to initiate registration")
+        raise RegistrationError(
+            "Failed to initiate registration",
+            code=20003,
+            status_code=400,
+        )
 
     redis = await get_redis()
     key = f"reg:{claims.jti}"
@@ -54,11 +92,11 @@ async def register_user(db: AsyncSession, user_in: UserCreate) -> AckOut:
 
     verify_url = f"{settings.BACKEND_PUBLIC_BASE_URL}/api/auth/verify?token={token}"
     html = (
-        f"<h3>欢迎注册</h3>"
-        f"<p>请点击下方按钮完成邮箱验证：</p>"
-        f"<p><a href='{verify_url}' style='padding:10px 16px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:6px'>验证邮箱</a></p>"
+        f"<h3>Welcome to the platform</h3>"
+        f"<p>Click the button below to complete the email verification:</p>"
+        f"<p><a href='{verify_url}' style='padding:10px 16px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:6px'>Verify Email</a></p>"
     )
-    await send_mail(user_in.email, "注册验证", html)
+    await send_mail(user_in.email, "Email Verification", html)
 
     return AckOut(ok=True)
 
@@ -66,8 +104,10 @@ async def register_user(db: AsyncSession, user_in: UserCreate) -> AckOut:
 async def login_user(db: AsyncSession, payload: LoginIn) -> TokenPair:
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
-    if user is None or not verify_password(payload.password, user.hashed_password):
-        raise Unauthorized("Invalid credentials")
+    if user is None or not verify_password(
+        payload.password.get_secret_value(), user.hashed_password
+    ):
+        raise CredentialsInvalid()
 
     access_token = create_access_token(subject=user.email)
     refresh = create_refresh_token(subject=user.email)
@@ -93,16 +133,22 @@ async def rotate_refresh_token(db: AsyncSession, token_pair: TokenPair) -> Token
             algorithms=[settings.ALGORITHM],
         )
     except JWTError:
-        raise Unauthorized("Invalid refresh token")
+        raise TokenInvalid(
+            data=TokenErrorData(token_type="refresh", reason="jwt_error")
+        )
 
     if payload.get("type") != "refresh" or not payload.get("sub"):
-        raise Unauthorized("Invalid refresh token")
+        raise TokenTypeMismatch(
+            data=TokenErrorData(token_type="refresh", reason="type_mismatch")
+        )
 
     jti = payload.get("jti")
     result = await db.execute(select(RefreshToken).where(RefreshToken.jti == jti))
     row = result.scalar_one_or_none()
     if row is None or row.revoked:
-        raise Unauthorized("Refresh token revoked")
+        raise TokenRevoked(
+            data=TokenErrorData(token_type="refresh", reason="revoked_or_missing")
+        )
 
     await db.execute(
         update(RefreshToken).where(RefreshToken.id == row.id).values(revoked=True)
@@ -131,11 +177,13 @@ async def revoke_refresh_token(db: AsyncSession, token_pair: TokenPair) -> AckOu
             algorithms=[settings.ALGORITHM],
         )
     except JWTError:
-        raise Unauthorized("Invalid refresh token")
+        raise TokenInvalid(
+            data=TokenErrorData(token_type="refresh", reason="jwt_error")
+        )
 
     jti = payload.get("jti")
     if not jti:
-        raise BadRequest("Malformed token")
+        raise TokenMalformed()
 
     await db.execute(
         update(RefreshToken).where(RefreshToken.jti == jti).values(revoked=True)
@@ -148,25 +196,29 @@ async def verify_email_and_issue_tokens(db: AsyncSession, token: str) -> TokenPa
     try:
         claims = verify_token(token, expected_type="verify")
     except Exception:
-        raise Unauthorized("Invalid verification token")
+        raise VerificationInvalid(data=VerificationErrorData(reason="jwt_error"))
 
     if not claims.sub:
-        raise Unauthorized("Invalid verification token")
+        raise VerificationInvalid(data=VerificationErrorData(reason="missing_sub"))
 
     result = await db.execute(select(User).where(User.email == claims.sub))
     user = result.scalar_one_or_none()
     if user is None:
         # lazy create from pending registration
         if not claims.jti:
-            raise Unauthorized("Invalid verification token")
+            raise VerificationInvalid(data=VerificationErrorData(reason="missing_jti"))
         redis = await get_redis()
         key = f"reg:{claims.jti}"
         raw = await redis.get(key)
         if not raw:
-            raise Unauthorized("Registration expired or invalid")
+            raise VerificationExpired(
+                data=VerificationErrorData(reason="pending_not_found")
+            )
         pending = PendingRegistration.model_validate_json(raw)
         if pending.email != claims.sub:
-            raise Unauthorized("Invalid registration payload")
+            raise VerificationInvalid(
+                data=VerificationErrorData(reason="email_mismatch")
+            )
 
         user = User(email=pending.email, hashed_password=pending.hashed_password)
         db.add(user)

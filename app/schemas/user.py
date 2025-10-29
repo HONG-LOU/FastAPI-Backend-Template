@@ -8,12 +8,13 @@ from pydantic import (
     field_validator,
     computed_field,
     ConfigDict,
+    SecretStr,
 )
 
 
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=8)
+    password: SecretStr
 
 
 class UserOut(BaseModel):

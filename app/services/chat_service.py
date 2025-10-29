@@ -5,7 +5,7 @@ import asyncio
 import contextlib
 
 from fastapi import WebSocket, WebSocketDisconnect
-from sqlalchemy import and_, desc, select, text
+from sqlalchemy import and_, desc, select, update, or_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 from app.services.ws_broker import get_broker, WebSocketConnection
@@ -179,14 +179,18 @@ async def mark_read_service(
         raise Forbidden("forbidden")
 
     await db.execute(
-        text(
-            """
-            update chat_participants
-            set last_read_message_id = :mid
-            where room_id = :rid and user_id = :uid and (last_read_message_id is null or last_read_message_id < :mid)
-            """
-        ),
-        {"mid": body.last_read_message_id, "rid": room_id, "uid": current_user_id},
+        update(ChatParticipant)
+        .where(
+            and_(
+                ChatParticipant.room_id == room_id,
+                ChatParticipant.user_id == current_user_id,
+                or_(
+                    ChatParticipant.last_read_message_id.is_(None),
+                    ChatParticipant.last_read_message_id < body.last_read_message_id,
+                ),
+            )
+        )
+        .values(last_read_message_id=body.last_read_message_id)
     )
     await db.commit()
 

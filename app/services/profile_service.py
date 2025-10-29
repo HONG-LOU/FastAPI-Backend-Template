@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Iterable
 
 from fastapi import UploadFile
-from sqlalchemy import and_, func, select, update, String
+from sqlalchemy import select, update, String
 from sqlalchemy.dialects.postgresql import array as pg_array, ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,7 +30,38 @@ async def get_me_service(db: AsyncSession, user_id: int) -> UserOut:
     row = await db.get(User, user_id)
     if row is None:
         raise NotFound("User not found")
-    return UserOut.model_validate(row, from_attributes=True)
+
+    resume_row = (
+        await db.execute(
+            select(
+                UserResume.id,
+                UserResume.created_at,
+                Attachment.id,
+                Attachment.filename,
+                Attachment.size_bytes,
+                Attachment.s3_key,
+            )
+            .join(Attachment, Attachment.id == UserResume.attachment_id)
+            .where(
+                UserResume.user_id == user_id, UserResume.is_current == True
+            )  # noqa: E712
+            .limit(1)
+        )
+    ).one_or_none()
+
+    base = UserOut.model_validate(row, from_attributes=True)
+    if resume_row:
+        rid, created_at, aid, fname, size, path = resume_row
+        resume = ResumeVersionOut(
+            id=rid,
+            attachment_id=aid,
+            filename=str(fname),
+            size_bytes=int(size),
+            created_at=created_at,
+            path=str(path),
+        )
+        return base.model_copy(update={"resume": resume})
+    return base
 
 
 async def update_me_service(
@@ -134,6 +165,7 @@ async def upload_resume_service(
         filename=attach.filename,
         size_bytes=attach.size_bytes,
         created_at=ur.created_at,
+        path=attach.s3_key,
     )
 
 
@@ -147,6 +179,7 @@ async def list_resume_versions_service(
             Attachment.id,
             Attachment.filename,
             Attachment.size_bytes,
+            Attachment.s3_key,
         )
         .join(Attachment, Attachment.id == UserResume.attachment_id)
         .where(UserResume.user_id == user_id)
@@ -154,7 +187,7 @@ async def list_resume_versions_service(
     )
     rows = (await db.execute(q)).all()
     out: list[ResumeVersionOut] = []
-    for rid, created_at, aid, fname, size in rows:
+    for rid, created_at, aid, fname, size, path in rows:
         out.append(
             ResumeVersionOut(
                 id=rid,
@@ -162,6 +195,7 @@ async def list_resume_versions_service(
                 filename=str(fname),
                 size_bytes=int(size),
                 created_at=created_at,
+                path=str(path),
             )
         )
     return out

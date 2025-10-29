@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 
 class TokenPair(BaseModel):
@@ -8,5 +8,10 @@ class TokenPair(BaseModel):
 
 
 class LoginIn(BaseModel):
-    email: str
+    email: EmailStr
     password: str
+
+
+class PendingRegistration(BaseModel):
+    email: EmailStr
+    hashed_password: str

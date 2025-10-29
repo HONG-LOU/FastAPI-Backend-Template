@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import json
 
 from jose import jwt
 from jose import JWTError
@@ -9,7 +8,11 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.exceptions import BadRequest, Conflict, Unauthorized
+from app.core.exceptions import (
+    BadRequest,
+    Conflict,
+    Unauthorized,
+)
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -21,8 +24,8 @@ from app.core.security import (
 )
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
-from app.schemas.auth import LoginIn, TokenPair
-from app.schemas.user import UserCreate, UserOut
+from app.schemas.auth import LoginIn, TokenPair, PendingRegistration
+from app.schemas.user import UserCreate
 from app.services.mailer import send_mail
 from app.schemas.common import AckOut
 from app.core.redis import get_redis
@@ -41,7 +44,11 @@ async def register_user(db: AsyncSession, user_in: UserCreate) -> AckOut:
 
     redis = await get_redis()
     key = f"reg:{claims.jti}"
-    data = json.dumps({"email": user_in.email, "hashed_password": hashed}).encode()
+    data = (
+        PendingRegistration(email=user_in.email, hashed_password=hashed)
+        .model_dump_json()
+        .encode()
+    )
     ttl = settings.VERIFY_TOKEN_EXPIRE_MINUTES * 60
     await redis.set(key, data, ex=ttl)
 
@@ -65,17 +72,17 @@ async def login_user(db: AsyncSession, payload: LoginIn) -> TokenPair:
     access_token = create_access_token(subject=user.email)
     refresh = create_refresh_token(subject=user.email)
 
-    claims = jwt_claims(refresh["token"])  # 仅解析 exp
+    claims = jwt_claims(refresh.token)  # 仅解析 exp
     refresh_row = RefreshToken(
         user_id=user.id,
-        jti=refresh["jti"],
+        jti=refresh.jti,
         expires_at=datetime.fromtimestamp(int(claims.exp or 0), tz=timezone.utc),
     )
 
     db.add(refresh_row)
     await db.commit()
 
-    return TokenPair(access_token=access_token, refresh_token=refresh["token"])
+    return TokenPair(access_token=access_token, refresh_token=refresh.token)
 
 
 async def rotate_refresh_token(db: AsyncSession, token_pair: TokenPair) -> TokenPair:
@@ -104,16 +111,16 @@ async def rotate_refresh_token(db: AsyncSession, token_pair: TokenPair) -> Token
     access_token = create_access_token(subject=payload["sub"])  # type: ignore[index]
     new_refresh = create_refresh_token(subject=payload["sub"])  # type: ignore[index]
 
-    claims = jwt_claims(new_refresh["token"])
+    claims = jwt_claims(new_refresh.token)
     new_row = RefreshToken(
         user_id=row.user_id,
-        jti=new_refresh["jti"],
+        jti=new_refresh.jti,
         expires_at=datetime.fromtimestamp(int(claims.exp or 0), tz=timezone.utc),
     )
     db.add(new_row)
     await db.commit()
 
-    return TokenPair(access_token=access_token, refresh_token=new_refresh["token"])
+    return TokenPair(access_token=access_token, refresh_token=new_refresh.token)
 
 
 async def revoke_refresh_token(db: AsyncSession, token_pair: TokenPair) -> AckOut:
@@ -157,16 +164,11 @@ async def verify_email_and_issue_tokens(db: AsyncSession, token: str) -> TokenPa
         raw = await redis.get(key)
         if not raw:
             raise Unauthorized("Registration expired or invalid")
-        try:
-            payload = json.loads(raw)
-        except Exception:
-            raise Unauthorized("Invalid registration payload")
-        email = payload.get("email")
-        hashed_password = payload.get("hashed_password")
-        if email != claims.sub or not hashed_password:
+        pending = PendingRegistration.model_validate_json(raw)
+        if pending.email != claims.sub:
             raise Unauthorized("Invalid registration payload")
 
-        user = User(email=email, hashed_password=hashed_password)
+        user = User(email=pending.email, hashed_password=pending.hashed_password)
         db.add(user)
         await db.commit()
         await db.refresh(user)
@@ -181,12 +183,12 @@ async def verify_email_and_issue_tokens(db: AsyncSession, token: str) -> TokenPa
 
     access_token = create_access_token(subject=user.email)
     refresh = create_refresh_token(subject=user.email)
-    rc = jwt_claims(refresh["token"])
+    rc = jwt_claims(refresh.token)
     row = RefreshToken(
         user_id=user.id,
-        jti=refresh["jti"],
+        jti=refresh.jti,
         expires_at=datetime.fromtimestamp(int(rc.exp or 0), tz=timezone.utc),
     )
     db.add(row)
     await db.commit()
-    return TokenPair(access_token=access_token, refresh_token=refresh["token"])
+    return TokenPair(access_token=access_token, refresh_token=refresh.token)

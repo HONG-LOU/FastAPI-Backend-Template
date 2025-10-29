@@ -20,12 +20,17 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
+class IssuedToken(BaseModel):
+    token: str
+    jti: str
+
+
 def _create_jwt_token(
     subject: str,
     token_type: str,
     expires_minutes: int,
     extra_claims: dict[str, Any] | None = None,
-) -> dict[str, str]:
+) -> IssuedToken:
     now = datetime.now(timezone.utc)
     expire = now + timedelta(minutes=expires_minutes)
     jti = uuid4().hex
@@ -41,7 +46,7 @@ def _create_jwt_token(
         payload.update(extra_claims)
 
     token = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
-    return {"token": token, "jti": jti}
+    return IssuedToken(token=token, jti=jti)
 
 
 def create_access_token(
@@ -52,10 +57,10 @@ def create_access_token(
         token_type="access",
         expires_minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES,
         extra_claims=extra_claims,
-    )["token"]
+    ).token
 
 
-def create_refresh_token(subject: str) -> dict[str, str]:
+def create_refresh_token(subject: str) -> IssuedToken:
     return _create_jwt_token(
         subject=subject,
         token_type="refresh",
@@ -68,7 +73,7 @@ def create_verify_token(subject: str) -> str:
         subject=subject,
         token_type="verify",
         expires_minutes=settings.VERIFY_TOKEN_EXPIRE_MINUTES,
-    )["token"]
+    ).token
 
 
 class JWTClaims(BaseModel):

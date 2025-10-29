@@ -1,5 +1,14 @@
+from __future__ import annotations
+
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field, field_validator, computed_field
+from pydantic import (
+    BaseModel,
+    EmailStr,
+    Field,
+    field_validator,
+    computed_field,
+    ConfigDict,
+)
 
 
 class UserCreate(BaseModel):
@@ -21,10 +30,9 @@ class UserOut(BaseModel):
     skills: list[str] = Field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    resume: "ResumeVersionOut | None" = None
 
-    model_config = {
-        "from_attributes": True,
-    }
+    model_config = ConfigDict(from_attributes=True)
 
     @computed_field  # type: ignore[misc]
     @property
@@ -55,5 +63,6 @@ class ResumeVersionOut(BaseModel):
     filename: str
     size_bytes: int
     created_at: datetime
+    path: str
 
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)

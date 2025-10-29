@@ -27,6 +27,7 @@ from app.schemas.chat import (
     WSPresence,
     WSChatMessage,
 )
+from app.schemas.common import AckOut
 
 
 UNREAD_TTL_SECONDS = 7 * 24 * 3600
@@ -164,7 +165,7 @@ async def send_message_service(
 
 async def mark_read_service(
     db: AsyncSession, room_id: int, body: MarkReadIn, current_user_id: int
-) -> "AckOut":
+) -> AckOut:
     exists = await db.execute(
         select(ChatParticipant).where(
             and_(
@@ -208,8 +209,6 @@ async def mark_read_service(
         )
     except Exception:
         pass
-    from app.schemas.common import AckOut
-
     return AckOut(ok=True)
 
 

@@ -6,6 +6,7 @@ from app.models.user import User
 from app.schemas.auth import LoginIn, TokenPair
 from app.schemas.common import AckOut
 from app.schemas.user import UserCreate, UserOut
+from app.services.profile_service import get_me_service
 from app.services.auth_service import (
     login_user,
     register_user,
@@ -39,8 +40,8 @@ async def logout(token_pair: TokenPair, db: DBSession) -> AckOut:
 
 
 @router.get("/me", response_model=UserOut)
-async def me(current_user: User = Depends(get_current_user)) -> UserOut:
-    return UserOut.model_validate(current_user)
+async def me(db: DBSession, current_user: User = Depends(get_current_user)) -> UserOut:
+    return await get_me_service(db, current_user.id)
 
 
 @router.get("/verify")

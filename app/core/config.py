@@ -28,8 +28,8 @@ class Settings(BaseSettings):
     BACKEND_CORS_ORIGINS: list[str] = []
 
     # Public URLs
-    FRONTEND_BASE_URL: str = "http://localhost:5173"
-    BACKEND_PUBLIC_BASE_URL: str = "http://localhost:8000"
+    FRONTEND_BASE_URL: str | None = None
+    BACKEND_PUBLIC_BASE_URL: str | None = None
 
     # Mail
     SMTP_HOST: str | None = None

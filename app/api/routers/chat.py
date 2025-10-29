@@ -58,7 +58,7 @@ async def mark_read(
     body: MarkReadIn,
     db: DBSession,
     user: User = Depends(get_current_user),
-) -> "AckOut":
+) -> AckOut:
     return await mark_read_service(db, room_id, body, user.id)
 
 

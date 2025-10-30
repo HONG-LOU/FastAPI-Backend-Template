@@ -91,12 +91,12 @@ function playBeep() {
     oscillator.type = 'sine'
     oscillator.frequency.value = 880
     gain.gain.setValueAtTime(0.0001, ctx.currentTime)
-    gain.gain.exponentialRampToValueAtTime(0.04, ctx.currentTime + 0.01)
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25)
+    gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.01)
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4)
     oscillator.connect(gain)
     gain.connect(ctx.destination)
     oscillator.start()
-    oscillator.stop(ctx.currentTime + 0.3)
+    oscillator.stop(ctx.currentTime + 0.45)
   } catch {}
 }
 
@@ -203,7 +203,10 @@ function connectWs() {
         addMessage(payload)
         removePendingDuplicate(payload)
         if (payload.sender_id !== meId.value) {
-          playBeep()
+          // 仅在页面不在前台或未聚焦时播放提示音
+          if (document.visibilityState !== 'visible' || !document.hasFocus()) {
+            playBeep()
+          }
           showDesktopNotification(payload)
         }
       }

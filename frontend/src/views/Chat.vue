@@ -65,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick, computed, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useMessage, NButton, NInput } from 'naive-ui'
 import { api } from '@/api/client'
@@ -86,6 +86,7 @@ const search = ref('')
 const groupName = ref('')
 const groupMembers = ref('')
 let ws: WebSocket | null = null
+let wsReconnectTimer: number | null = null
 const currentRoom = computed(() => conversations.value.find((c: any) => c.id === roomId.value))
 const filteredUsers = computed(() => {
   const kw = (search.value || '').trim().toLowerCase()
@@ -308,6 +309,13 @@ async function selectRoom(id: number) {
   connectWs()
 }
 
+// 当 access_token 变化时，为当前房间重连 WebSocket 以使用最新凭据
+watch(() => auth.tokens?.access_token, (val, oldVal) => {
+  if (val && val !== oldVal && roomId.value) {
+    connectWs()
+  }
+})
+
 function connectWs() {
   if (!roomId.value || !auth.tokens?.access_token) return
   if (ws) ws.close()
@@ -329,6 +337,22 @@ function connectWs() {
         }
       }
     } catch {}
+  }
+  ws.onopen = () => {
+    if (wsReconnectTimer) {
+      clearTimeout(wsReconnectTimer)
+      wsReconnectTimer = null
+    }
+  }
+  ws.onerror = () => {
+    try { ws?.close() } catch {}
+  }
+  ws.onclose = () => {
+    if (wsReconnectTimer) return
+    wsReconnectTimer = window.setTimeout(() => {
+      wsReconnectTimer = null
+      connectWs()
+    }, 1000)
   }
 }
 

@@ -53,6 +53,7 @@
               <span v-if="m.status==='failed'" class="failed">发送失败</span>
             </div>
           </div>
+          <div ref="bottomEl"></div>
         </div>
         <div class="editor">
           <n-input ref="editorRef" v-model:value="text" type="textarea" :autosize="{minRows:2,maxRows:4}" @keyup.enter.exact.prevent="send" />
@@ -97,6 +98,7 @@ const filteredUsers = computed(() => {
 const groups = computed(() => conversations.value.filter((c: any) => c.type === 'group'))
 const sending = ref(false)
 const messagesEl = ref<HTMLElement | null>(null)
+const bottomEl = ref<HTMLElement | null>(null)
 const editorRef = ref<InstanceType<typeof NInput> | null>(null)
 const audioCtx = ref<AudioContext | null>(null)
 
@@ -122,13 +124,15 @@ function playBeep() {
     const gain = ctx.createGain()
     oscillator.type = 'sine'
     oscillator.frequency.value = 880
-    gain.gain.setValueAtTime(0.0001, ctx.currentTime)
-    gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.01)
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4)
+    // 加大音量并延长一点时长，避免爆音仍保留快速淡入淡出
+    const now = ctx.currentTime
+    gain.gain.setValueAtTime(0.0001, now)
+    gain.gain.exponentialRampToValueAtTime(0.3, now + 0.015)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.55)
     oscillator.connect(gain)
     gain.connect(ctx.destination)
-    oscillator.start()
-    oscillator.stop(ctx.currentTime + 0.45)
+    oscillator.start(now)
+    oscillator.stop(now + 0.6)
   } catch {}
 }
 
@@ -281,7 +285,7 @@ async function loadMessages() {
   data.sort((a: Msg, b: Msg) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
   messages.value = data
   await nextTick()
-  scrollToBottom()
+  scheduleScrollToBottom()
 }
 
 async function loadConversations() {
@@ -342,6 +346,7 @@ async function send() {
       created_at: new Date().toISOString()
     }
     messages.value.push(temp)
+    scheduleScrollToBottom()
     const contentBackup = text.value
     text.value = ''
     const { data } = await api.post('/api/chat/messages', { room_id: roomId.value, content: contentBackup })
@@ -349,6 +354,7 @@ async function send() {
     if (idx >= 0) {
       messages.value[idx] = data
       if (data?.id) messageIds.add(data.id)
+      scheduleScrollToBottom()
     } else {
       addMessage(data)
     }
@@ -359,6 +365,7 @@ async function send() {
       const m = messages.value[i]
       if (m.status === 'pending' && m.sender_id === meId.value && m.room_id === roomId.value) {
         m.status = 'failed'
+        scheduleScrollToBottom()
         break
       }
     }
@@ -367,6 +374,7 @@ async function send() {
   finally {
     sending.value = false
     await nextTick()
+    scheduleScrollToBottom()
     editorRef.value?.focus()
   }
 }
@@ -380,7 +388,7 @@ function addMessage(m: Msg) {
   if (m.id && messageIds.has(m.id)) return
   if (m.id) messageIds.add(m.id)
   messages.value.push(m)
-  nextTick(scrollToBottom)
+  scheduleScrollToBottom()
 }
 
 function removePendingDuplicate(m: Msg) {
@@ -390,9 +398,23 @@ function removePendingDuplicate(m: Msg) {
 }
 
 function scrollToBottom() {
-  const el = messagesEl.value
-  if (!el) return
-  el.scrollTop = el.scrollHeight
+  // 优先使用底部锚点，布局尚未稳定时更可靠
+  const anchor = bottomEl.value
+  if (anchor && anchor.scrollIntoView) {
+    try { anchor.scrollIntoView({ behavior: 'auto', block: 'end' }) } catch {}
+  } else {
+    const el = messagesEl.value
+    if (el) el.scrollTop = el.scrollHeight
+  }
+}
+
+function scheduleScrollToBottom() {
+  // 使用双 rAF 等待布局与绘制完成后再滚动，提升稳定性
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      scrollToBottom()
+    })
+  })
 }
 </script>
 

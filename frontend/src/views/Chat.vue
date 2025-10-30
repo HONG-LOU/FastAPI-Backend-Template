@@ -8,24 +8,43 @@
     </header>
     <section class="content">
       <aside class="sidebar">
-        <div class="convs" v-if="conversations.length">
+        <div class="users" v-if="allUsers?.length">
+          <div class="section-title">所有用户</div>
           <div
-            v-for="c in conversations"
+            v-for="u in filteredUsers"
+            :key="u.id"
+            class="user"
+            @click="startDirectWithUser(u.id)"
+          >
+            <div class="title">{{ u.name || u.email }}</div>
+          </div>
+        </div>
+        <div class="convs" v-if="groups.length">
+          <div
+            v-for="c in groups"
             :key="c.id"
             class="conv"
             :class="{ active: c.id===roomId }"
             @click="selectRoom(c.id)"
           >
-            <div class="title">{{ c.peer?.name || c.peer?.email || '群聊' }}</div>
+            <div class="title">{{ c.name || c.peer?.name || c.peer?.email || '群聊' }}</div>
             <div class="preview">{{ c.last_message?.content || ' ' }}</div>
           </div>
         </div>
         <div class="tools">
           <n-input v-model:value="search" placeholder="输入邮箱或用户ID开始聊天" />
           <n-button block style="margin-top:8px" @click="createDirectRoom">创建直聊</n-button>
+          <n-input v-model:value="groupName" placeholder="群名称（可选）" style="margin-top:12px" />
+          <n-input v-model:value="groupMembers" placeholder="群成员（用逗号分隔邮箱或ID）" style="margin-top:8px" />
+          <n-button block style="margin-top:8px" @click="createGroupRoom">创建群聊</n-button>
         </div>
       </aside>
       <main class="main">
+        <div class="room-header" v-if="currentRoom">
+          <div class="room-title">{{ currentRoom.name || currentRoom.peer?.name || currentRoom.peer?.email || '群聊' }}</div>
+          <div class="spacer" />
+          <n-button v-if="currentRoom.type==='group'" size="small" @click="onAddMember">添加成员</n-button>
+        </div>
         <div class="messages" ref="messagesEl">
           <div v-for="m in messages" :key="m.localId || m.id" class="msg" :class="{ me: m.sender_id===meId }">
             <div class="bubble">
@@ -45,7 +64,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useMessage, NButton, NInput } from 'naive-ui'
 import { api } from '@/api/client'
@@ -59,10 +78,23 @@ const meEmail = ref<string>('')
 const roomId = ref<number | null>(null)
 const messages = ref<Msg[]>([])
 const conversations = ref<any[]>([])
+const allUsers = ref<any[]>([])
 const messageIds = new Set<number>()
 const text = ref('')
 const search = ref('')
+const groupName = ref('')
+const groupMembers = ref('')
 let ws: WebSocket | null = null
+const currentRoom = computed(() => conversations.value.find((c: any) => c.id === roomId.value))
+const filteredUsers = computed(() => {
+  const kw = (search.value || '').trim().toLowerCase()
+  const base = allUsers.value.filter((u: any) => u.id !== meId.value)
+  if (!kw) return base
+  return base.filter((u: any) =>
+    (u.name && u.name.toLowerCase().includes(kw)) || (u.email && u.email.toLowerCase().includes(kw))
+  )
+})
+const groups = computed(() => conversations.value.filter((c: any) => c.type === 'group'))
 const sending = ref(false)
 const messagesEl = ref<HTMLElement | null>(null)
 const editorRef = ref<InstanceType<typeof NInput> | null>(null)
@@ -129,7 +161,7 @@ onMounted(async () => {
   requestNotificationPermission()
   window.addEventListener('click', ensureAudioContext, { once: true })
   window.addEventListener('keydown', ensureAudioContext, { once: true })
-  await loadConversations()
+  await Promise.all([loadConversations(), loadAllUsers()])
   const cached = Number(localStorage.getItem('selected_room_id') || 0)
   if (cached && conversations.value.some(c => c.id === cached)) {
     await selectRoom(cached)
@@ -168,6 +200,81 @@ async function createDirectRoom() {
   }
 }
 
+async function startDirectWithUser(uid: number) {
+  if (!uid || uid === meId.value) return
+  try {
+    const { data } = await api.post('/api/chat/rooms/direct', { user_id: uid })
+    roomId.value = data.id
+    await loadMessages()
+    connectWs()
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || '创建失败')
+  }
+}
+
+async function createGroupRoom() {
+  const membersRaw = (groupMembers.value || '').trim()
+  if (!membersRaw) {
+    message.warning('请输入群成员（逗号分隔邮箱或ID）')
+    return
+  }
+  const parts = membersRaw.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean)
+  const emails: string[] = []
+  const user_ids: number[] = []
+  for (const p of parts) {
+    if (p.includes('@')) emails.push(p)
+    else {
+      const n = Number(p)
+      if (n) user_ids.push(n)
+    }
+  }
+  if (!emails.length && !user_ids.length) {
+    message.warning('请输入有效的邮箱或用户ID')
+    return
+  }
+  const payload: any = { name: groupName.value || undefined }
+  if (emails.length) payload.emails = emails
+  if (user_ids.length) payload.user_ids = user_ids
+  try {
+    const { data } = await api.post('/api/chat/rooms/group', payload)
+    roomId.value = data.id
+    await loadMessages()
+    connectWs()
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || '创建失败')
+  }
+}
+
+function parseSingleUser(input: string): { emails?: string[]; user_ids?: number[] } | null {
+  const raw = (input || '').trim()
+  if (!raw) return null
+  if (raw.includes('@')) return { emails: [raw] }
+  const n = Number(raw)
+  if (n) return { user_ids: [n] }
+  return null
+}
+
+async function onAddMember() {
+  if (!roomId.value || currentRoom?.value?.type !== 'group') {
+    message.warning('仅群聊可添加成员')
+    return
+  }
+  const raw = window.prompt('输入成员邮箱或ID：')
+  if (raw == null) return
+  const payload = parseSingleUser(raw)
+  if (!payload) {
+    message.warning('请输入有效的邮箱或用户ID')
+    return
+  }
+  try {
+    await api.post(`/api/chat/rooms/${roomId.value}/participants`, payload)
+    message.success('已添加')
+  } catch (e: any) {
+    const msg = e?.response?.data?.message || '添加失败'
+    message.error(msg.includes('no valid participants') ? '用户不存在' : msg)
+  }
+}
+
 async function loadMessages() {
   if (!roomId.value) return
   const { data } = await api.get(`/api/chat/rooms/${roomId.value}/messages`, { params: { limit: 50 } })
@@ -180,6 +287,13 @@ async function loadMessages() {
 async function loadConversations() {
   const { data } = await api.get('/api/chat/rooms')
   conversations.value = data
+}
+
+async function loadAllUsers() {
+  try {
+    const { data } = await api.get('/api/profile/users', { params: { limit: 500 } })
+    allUsers.value = data
+  } catch {}
 }
 
 async function selectRoom(id: number) {
@@ -290,13 +404,19 @@ function scrollToBottom() {
 .me { color: #6b7280; font-size: 14px; }
 .content { flex: 1; display: flex; min-height: 0; }
 .sidebar { width: 280px; border-right: 1px solid #eee; padding: 12px; display: flex; flex-direction: column; }
-.convs { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.convs { flex: 0 0 auto; max-height: 40%; overflow: auto; display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.users { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.section-title { font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+.user { padding: 6px 8px; border-radius: 8px; cursor: pointer; }
+.user:hover { background: #f9fafb; }
 .conv { padding: 8px; border-radius: 8px; cursor: pointer; }
 .conv.active { background: #eef2ff; }
 .conv .title { font-weight: 600; font-size: 14px; }
 .conv .preview { color: #6b7280; font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tools { border-top: 1px solid #eee; padding-top: 8px; margin-top: 8px; }
 .main { flex: 1; display: flex; flex-direction: column; }
+.room-header { height: 44px; display: flex; align-items: center; padding: 0 12px; border-bottom: 1px solid #eee; }
+.room-title { font-weight: 600; }
 .messages { flex: 1; padding: 12px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
 .msg { display: flex; }
 .msg.me { justify-content: flex-end; }

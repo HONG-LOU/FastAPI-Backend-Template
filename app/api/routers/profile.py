@@ -14,6 +14,7 @@ from app.services.profile_service import (
     update_me_service,
     upload_avatar_service,
     upload_resume_service,
+    list_users_service,
 )
 
 
@@ -42,18 +43,14 @@ async def update_me(
 
 @router.post("/me/avatar", response_model=UserOut)
 async def upload_avatar(
-    db: DBSession,
-    user: User = Depends(get_current_user),
-    file: UploadFile = File(..., description="JPEG/PNG <= 2MB"),
+    db: DBSession, user: User = Depends(get_current_user), file: UploadFile = File(...)
 ) -> UserOut:
     return await upload_avatar_service(db, user.id, file)
 
 
 @router.post("/me/resume", response_model=ResumeVersionOut)
 async def upload_resume(
-    db: DBSession,
-    user: User = Depends(get_current_user),
-    file: UploadFile = File(...),
+    db: DBSession, user: User = Depends(get_current_user), file: UploadFile = File(...)
 ) -> ResumeVersionOut:
     return await upload_resume_service(db, user.id, file)
 
@@ -74,3 +71,16 @@ async def search_users(
     limit: int = Query(50, ge=1, le=200),
 ) -> list[UserOut]:
     return await search_by_skills_service(db, skills, limit)
+
+
+@router.get("/users", response_model=list[UserOut])
+async def list_users(
+    db: DBSession,
+    q: str | None = Query(None, description="按姓名或邮箱筛选"),
+    limit: int = Query(200, ge=1, le=500),
+    cursor: int | None = Query(
+        None, description="基于id的游标分页，返回小于该id的数据"
+    ),
+    user: User = Depends(get_current_user),
+) -> list[UserOut]:
+    return await list_users_service(db, q=q, limit=limit, cursor=cursor)

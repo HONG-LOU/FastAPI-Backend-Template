@@ -11,6 +11,7 @@ class ChatRoom(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     type: Mapped[str] = mapped_column(String(16), default="direct", index=True)
+    name: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=func.now(), index=True)
 
 

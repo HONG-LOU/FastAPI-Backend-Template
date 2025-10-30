@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Iterable
 
 from fastapi import UploadFile
-from sqlalchemy import select, update, String
+from sqlalchemy import select, update, String, or_
 from sqlalchemy.dialects.postgresql import array as pg_array, ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -210,4 +210,18 @@ async def search_by_skills_service(
     param = pg_array(skills, type_=ARRAY(String()))
     q = select(User).where(User.skills.overlap(param)).limit(limit)
     rows = (await db.execute(q)).scalars().all()
+    return [UserOut.model_validate(u, from_attributes=True) for u in rows]
+
+
+async def list_users_service(
+    db: AsyncSession, *, q: str | None, limit: int, cursor: int | None
+) -> list[UserOut]:
+    stmt = select(User)
+    if q:
+        kw = f"%{q.strip()}%"
+        stmt = stmt.where(or_(User.email.ilike(kw), User.name.ilike(kw)))
+    if cursor is not None:
+        stmt = stmt.where(User.id < cursor)
+    stmt = stmt.order_by(User.id.desc()).limit(limit)
+    rows = (await db.execute(stmt)).scalars().all()
     return [UserOut.model_validate(u, from_attributes=True) for u in rows]

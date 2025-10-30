@@ -12,7 +12,7 @@ from app.services.ws_broker import get_broker, WebSocketConnection
 from app.core.metrics import inc
 from app.core.logging import get_logger
 
-from app.core.exceptions import BadRequest, Forbidden, UserNotFound
+from app.core.exceptions import BadRequest, Forbidden, UserNotFound, NotFound
 from app.core.redis import get_redis, publish_model
 from app.db.session import AsyncSessionLocal
 from app.models.chat import ChatParticipant, ChatRoom, Message
@@ -24,6 +24,8 @@ from app.schemas.chat import (
     PeerOut,
     RoomSummaryOut,
     RoomCreateDirect,
+    RoomCreateGroup,
+    ParticipantsChangeIn,
     RoomOut,
     UnreadCountOut,
     WSPresence,
@@ -181,6 +183,7 @@ async def list_rooms_service(
             RoomSummaryOut(
                 id=int(room.id),
                 type=room.type,
+                name=getattr(room, "name", None),
                 peer=peer_out,
                 last_message=last_out,
                 unread_count=unread.get(int(room.id), 0),
@@ -252,6 +255,99 @@ async def send_message_service(
         except Exception:
             pass
     return MessageOut.model_validate(msg, from_attributes=True)
+
+
+async def create_group_room_service(
+    db: AsyncSession, payload: RoomCreateGroup, current_user_id: int
+) -> RoomOut:
+    target_ids: set[int] = set()
+    if payload.user_ids:
+        target_ids.update(int(x) for x in payload.user_ids if int(x) != current_user_id)
+    if payload.emails:
+        rows = (
+            await db.execute(select(User.id).where(User.email.in_(payload.emails)))
+        ).scalars().all()
+        target_ids.update(int(x) for x in rows if int(x) != current_user_id)
+    if not target_ids:
+        raise BadRequest("no valid participants")
+
+    room = ChatRoom(type="group", name=(payload.name or None))
+    db.add(room)
+    await db.flush()
+
+    values = [
+        {"room_id": room.id, "user_id": current_user_id},
+        *({"room_id": room.id, "user_id": uid} for uid in sorted(target_ids)),
+    ]
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    stmt = pg_insert(ChatParticipant).values(values)
+    stmt = stmt.on_conflict_do_nothing(index_elements=[ChatParticipant.room_id.key, ChatParticipant.user_id.key])
+    await db.execute(stmt)
+    await db.commit()
+    await db.refresh(room)
+    return RoomOut.model_validate(room, from_attributes=True)
+
+
+async def add_participants_service(
+    db: AsyncSession, room_id: int, payload: ParticipantsChangeIn, current_user_id: int
+) -> AckOut:
+    exists = await db.execute(
+        select(ChatParticipant).where(
+            and_(ChatParticipant.room_id == room_id, ChatParticipant.user_id == current_user_id)
+        )
+    )
+    if exists.scalar_one_or_none() is None:
+        raise Forbidden("forbidden")
+
+    target_ids: set[int] = set(payload.user_ids or [])
+    if payload.emails:
+        rows = (
+            await db.execute(select(User.id).where(User.email.in_(payload.emails)))
+        ).scalars().all()
+        target_ids.update(int(x) for x in rows)
+    if not target_ids:
+        raise BadRequest("no valid participants")
+
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    stmt = pg_insert(ChatParticipant).values(
+        [{"room_id": room_id, "user_id": int(uid)} for uid in sorted(target_ids)]
+    ).on_conflict_do_nothing(index_elements=[ChatParticipant.room_id.key, ChatParticipant.user_id.key])
+    await db.execute(stmt)
+    await db.commit()
+    return AckOut(ok=True)
+
+
+async def remove_participants_service(
+    db: AsyncSession, room_id: int, payload: ParticipantsChangeIn, current_user_id: int
+) -> AckOut:
+    exists = await db.execute(
+        select(ChatParticipant).where(
+            and_(ChatParticipant.room_id == room_id, ChatParticipant.user_id == current_user_id)
+        )
+    )
+    if exists.scalar_one_or_none() is None:
+        raise Forbidden("forbidden")
+
+    ids: set[int] = set(payload.user_ids or [])
+    if payload.emails:
+        rows = (
+            await db.execute(select(User.id).where(User.email.in_(payload.emails)))
+        ).scalars().all()
+        ids.update(int(x) for x in rows)
+    if not ids:
+        raise BadRequest("no valid participants")
+
+    from sqlalchemy import delete
+
+    await db.execute(
+        delete(ChatParticipant).where(
+            and_(ChatParticipant.room_id == room_id, ChatParticipant.user_id.in_(ids))
+        )
+    )
+    await db.commit()
+    return AckOut(ok=True)
 
 
 async def mark_read_service(
@@ -364,6 +460,18 @@ async def unread_count_service(
     except Exception:
         pass
     return UnreadCountOut(count=int(cnt))
+
+
+async def list_all_users_service(
+    db: AsyncSession, current_user_id: int, query: str | None, limit: int
+) -> list[PeerOut]:
+    q = select(User).where(User.is_active.is_(True), User.id != current_user_id)
+    if query:
+        like = f"%{query.strip()}%"
+        q = q.where(or_(User.name.ilike(like), User.email.ilike(like)))
+    q = q.order_by(User.name.nullslast(), User.email).limit(limit)
+    rows = (await db.execute(q)).scalars().all()
+    return [PeerOut(id=int(u.id), email=u.email, name=u.name, avatar_url=u.avatar_path) for u in rows]
 
 
 async def ws_authorize_and_room_check(

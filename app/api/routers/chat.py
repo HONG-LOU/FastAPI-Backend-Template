@@ -14,6 +14,9 @@ from app.schemas.chat import (
     RoomCreateDirect,
     RoomOut,
     UnreadCountOut,
+    RoomCreateGroup,
+    ParticipantsChangeIn,
+    PeerOut,
 )
 from app.services.chat_service import (
     create_direct_room_service,
@@ -23,6 +26,10 @@ from app.services.chat_service import (
     send_message_service,
     unread_count_service,
     ws_handler,
+    create_group_room_service,
+    add_participants_service,
+    remove_participants_service,
+    list_all_users_service,
 )
 
 
@@ -32,12 +39,48 @@ async def list_rooms(db: DBSession, user: User = Depends(get_current_user)) -> l
     return await list_rooms_service(db, user.id)
 
 
+@router.get("/users", response_model=list[PeerOut])
+async def list_all_users(
+    db: DBSession,
+    user: User = Depends(get_current_user),
+    query: str | None = Query(None, description="按姓名或邮箱模糊搜索"),
+    limit: int = Query(200, ge=1, le=1000),
+) -> list[PeerOut]:
+    return await list_all_users_service(db, user.id, query, limit)
+
 
 @router.post("/rooms/direct", response_model=RoomOut)
 async def create_direct_room(
     payload: RoomCreateDirect, db: DBSession, user: User = Depends(get_current_user)
 ) -> RoomOut:
     return await create_direct_room_service(db, payload, user.id)
+
+
+@router.post("/rooms/group", response_model=RoomOut)
+async def create_group_room(
+    payload: RoomCreateGroup, db: DBSession, user: User = Depends(get_current_user)
+) -> RoomOut:
+    return await create_group_room_service(db, payload, user.id)
+
+
+@router.post("/rooms/{room_id}/participants", response_model=AckOut)
+async def add_participants(
+    room_id: int,
+    payload: ParticipantsChangeIn,
+    db: DBSession,
+    user: User = Depends(get_current_user),
+) -> AckOut:
+    return await add_participants_service(db, room_id, payload, user.id)
+
+
+@router.delete("/rooms/{room_id}/participants", response_model=AckOut)
+async def remove_participants(
+    room_id: int,
+    payload: ParticipantsChangeIn,
+    db: DBSession,
+    user: User = Depends(get_current_user),
+) -> AckOut:
+    return await remove_participants_service(db, room_id, payload, user.id)
 
 
 @router.get("/rooms/{room_id}/messages", response_model=list[MessageOut])

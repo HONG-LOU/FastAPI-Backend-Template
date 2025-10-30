@@ -54,6 +54,7 @@ class RoomCreateDirect(BaseModel):
 class RoomOut(BaseModel):
     id: int
     type: str
+    name: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -100,9 +101,27 @@ class PeerOut(BaseModel):
 class RoomSummaryOut(BaseModel):
     id: int
     type: str
+    name: str | None = None
     peer: PeerOut | None = None
     last_message: MessageOut | None = None
     unread_count: int = 0
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class RoomCreateGroup(BaseModel):
+    user_ids: list[int] | None = None
+    emails: list[EmailStr] | None = None
+    name: str | None = Field(default=None, max_length=64)
+
+    @model_validator(mode="after")
+    def _check_targets(self) -> "RoomCreateGroup":
+        if not self.user_ids and not self.emails:
+            raise ValueError("user_ids or emails is required")
+        return self
+
+
+class ParticipantsChangeIn(BaseModel):
+    user_ids: list[int] | None = None
+    emails: list[EmailStr] | None = None

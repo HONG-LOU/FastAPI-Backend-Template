@@ -36,7 +36,7 @@
           </div>
         </div>
         <div class="editor">
-          <n-input v-model:value="text" type="textarea" :autosize="{minRows:2,maxRows:4}" @keyup.enter.exact.prevent="send" :disabled="sending" />
+          <n-input ref="editorRef" v-model:value="text" type="textarea" :autosize="{minRows:2,maxRows:4}" @keyup.enter.exact.prevent="send" />
           <n-button type="primary" @click="send" :disabled="!roomId || sending" :loading="sending">发送</n-button>
         </div>
       </main>
@@ -65,6 +65,7 @@ const search = ref('')
 let ws: WebSocket | null = null
 const sending = ref(false)
 const messagesEl = ref<HTMLElement | null>(null)
+const editorRef = ref<InstanceType<typeof NInput> | null>(null)
 
 onMounted(async () => {
   try {
@@ -190,6 +191,8 @@ async function send() {
   }
   finally {
     sending.value = false
+    await nextTick()
+    editorRef.value?.focus()
   }
 }
 

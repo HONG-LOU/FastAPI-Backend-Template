@@ -10,12 +10,14 @@ from app.schemas.chat import (
     MarkReadIn,
     MessageCreate,
     MessageOut,
+    RoomSummaryOut,
     RoomCreateDirect,
     RoomOut,
     UnreadCountOut,
 )
 from app.services.chat_service import (
     create_direct_room_service,
+    list_rooms_service,
     list_messages_service,
     mark_read_service,
     send_message_service,
@@ -25,6 +27,10 @@ from app.services.chat_service import (
 
 
 router = APIRouter()
+@router.get("/rooms", response_model=list[RoomSummaryOut])
+async def list_rooms(db: DBSession, user: User = Depends(get_current_user)) -> list[RoomSummaryOut]:
+    return await list_rooms_service(db, user.id)
+
 
 
 @router.post("/rooms/direct", response_model=RoomOut)

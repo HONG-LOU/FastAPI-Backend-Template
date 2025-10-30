@@ -18,13 +18,15 @@ class WSChatMessage(WSMessage):
     id: int
     room_id: int
     sender_id: int
-    content: str
+    content: str | None = None
     created_at: datetime
+    attachments: list["AttachmentOut"] = []
 
 
 class MessageCreate(BaseModel):
     room_id: int
     content: str | None = Field(default=None, max_length=5000)
+    attachment_ids: list[int] = Field(default_factory=list)
 
 
 class MessageOut(BaseModel):
@@ -34,6 +36,7 @@ class MessageOut(BaseModel):
     kind: str
     content: str | None
     created_at: datetime
+    attachments: list["AttachmentOut"] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -73,12 +76,13 @@ class AttachmentInitOut(BaseModel):
 
 class AttachmentOut(BaseModel):
     id: int
-    message_id: int
+    message_id: int | None = None
     filename: str
     content_type: str
     size_bytes: int
     status: str
     created_at: datetime
+    url: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

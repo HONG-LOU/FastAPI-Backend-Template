@@ -47,16 +47,39 @@
         </div>
         <div class="messages" ref="messagesEl">
           <div v-for="m in messages" :key="m.localId || m.id" class="msg" :class="{ me: m.sender_id===meId }">
-            <div class="bubble">
-              <span>{{ m.content }}</span>
+            <div class="bubble" :class="{ 'image-only': !m.content && m.attachments?.length && m.attachments.every(a => a.content_type && a.content_type.startsWith('image/')) }">
+              <span v-if="m.content">{{ m.content }}</span>
+              <template v-if="m.attachments?.length">
+                <div class="attachments" :class="{ 'image-only': !m.content && m.attachments?.length && m.attachments.every(a => a.content_type && a.content_type.startsWith('image/')) }">
+                  <template v-for="a in m.attachments" :key="a.id">
+                    <img
+                      v-if="a.content_type && a.content_type.startsWith('image/')"
+                      :src="attSrcMap[a.id] || a.url"
+                      class="image-att"
+                      @error="() => fetchImageBlob(a)"
+                      @load="scheduleScrollToBottom"
+                    />
+                    <div v-else class="file-card">
+                      <div class="file-icon">📄</div>
+                      <div class="file-info">
+                        <div class="file-name" :title="a.filename">{{ a.filename }}</div>
+                        <div class="file-meta">{{ formatSize(a.size_bytes) }}</div>
+                      </div>
+                      <a class="file-action" :href="a.url" :download="a.filename" target="_blank" rel="noopener noreferrer">下载</a>
+                    </div>
+                  </template>
+                </div>
+              </template>
               <span v-if="m.status==='pending'" class="dot-loading" />
               <span v-if="m.status==='failed'" class="failed">发送失败</span>
             </div>
           </div>
           <div ref="bottomEl"></div>
         </div>
-        <div class="editor">
+        <div class="editor" @paste.prevent="onPaste" @dragover.prevent @drop.prevent="onDrop">
+          <input ref="fileInputRef" type="file" multiple style="display:none" @change="onPickFiles" />
           <n-input ref="editorRef" v-model:value="text" type="textarea" :autosize="{minRows:2,maxRows:4}" @keyup.enter.exact.prevent="send" />
+          <n-button @click="pickFiles" :disabled="!roomId || sending">上传文件</n-button>
           <n-button type="primary" @click="send" :disabled="!roomId || sending" :loading="sending">发送</n-button>
         </div>
       </main>
@@ -70,7 +93,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useMessage, NButton, NInput } from 'naive-ui'
 import { api } from '@/api/client'
 
-type Msg = { id?: number; localId?: string; status?: 'pending' | 'failed'; room_id: number; sender_id: number; content: string; created_at: string }
+type Att = { id: number; url: string; filename: string; content_type: string; size_bytes: number }
+type Msg = { id?: number; localId?: string; status?: 'pending' | 'failed'; room_id: number; sender_id: number; content: string | null; created_at: string; attachments?: Att[] }
 
 const message = useMessage()
 const auth = useAuthStore()
@@ -101,7 +125,9 @@ const sending = ref(false)
 const messagesEl = ref<HTMLElement | null>(null)
 const bottomEl = ref<HTMLElement | null>(null)
 const editorRef = ref<InstanceType<typeof NInput> | null>(null)
+const fileInputRef = ref<HTMLInputElement | null>(null)
 const audioCtx = ref<AudioContext | null>(null)
+const attSrcMap = ref<Record<number, string>>({})
 
 function ensureAudioContext() {
   try {
@@ -373,7 +399,7 @@ async function send() {
     scheduleScrollToBottom()
     const contentBackup = text.value
     text.value = ''
-    const { data } = await api.post('/api/chat/messages', { room_id: roomId.value, content: contentBackup })
+    const { data } = await api.post('/api/chat/messages', { room_id: roomId.value, content: contentBackup, attachment_ids: [] })
     const idx = messages.value.findIndex(m => m.localId === localId)
     if (idx >= 0) {
       messages.value[idx] = data
@@ -417,7 +443,12 @@ function addMessage(m: Msg) {
 
 function removePendingDuplicate(m: Msg) {
   if (!m?.id || !meId.value) return
-  const idx = messages.value.findIndex(x => x.status === 'pending' && x.sender_id === meId.value && x.room_id === m.room_id && x.content === m.content)
+  const sameAtt = (a?: Att[], b?: Att[]) => {
+    const aa = (a || []).map(x => `${x.filename}:${x.size_bytes}`).sort().join('|')
+    const bb = (b || []).map(x => `${x.filename}:${x.size_bytes}`).sort().join('|')
+    return aa === bb
+  }
+  const idx = messages.value.findIndex(x => x.status === 'pending' && x.sender_id === meId.value && x.room_id === m.room_id && x.content === m.content && sameAtt(x.attachments, m.attachments))
   if (idx >= 0) messages.value.splice(idx, 1)
 }
 
@@ -439,6 +470,87 @@ function scheduleScrollToBottom() {
       scrollToBottom()
     })
   })
+}
+
+async function fetchImageBlob(a: Att) {
+  if (attSrcMap.value[a.id]) return
+  try {
+    const resp = await api.get(a.url, { responseType: 'blob' })
+    const url = URL.createObjectURL(resp.data)
+    attSrcMap.value = { ...attSrcMap.value, [a.id]: url }
+  } catch {}
+}
+
+function formatSize(n: number) {
+  if (!n && n !== 0) return ''
+  const kb = 1024, mb = 1024 * 1024, gb = 1024 * 1024 * 1024
+  if (n >= gb) return (n / gb).toFixed(2) + ' GB'
+  if (n >= mb) return (n / mb).toFixed(2) + ' MB'
+  if (n >= kb) return (n / kb).toFixed(2) + ' KB'
+  return n + ' B'
+}
+
+function pickFiles() {
+  fileInputRef.value?.click()
+}
+
+async function onPickFiles(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (!input?.files || !roomId.value) return
+  const files = Array.from(input.files)
+  input.value = ''
+  await uploadAndSend(files)
+}
+
+async function onPaste(e: ClipboardEvent) {
+  const files = Array.from(e.clipboardData?.files || [])
+  if (!files.length || !roomId.value) return
+  await uploadAndSend(files)
+}
+
+async function onDrop(e: DragEvent) {
+  const files = Array.from(e.dataTransfer?.files || [])
+  if (!files.length || !roomId.value) return
+  await uploadAndSend(files)
+}
+
+async function uploadAndSend(files: File[]) {
+  try {
+    const form = new FormData()
+    for (const f of files) form.append('files', f)
+    const { data } = await api.post('/api/chat/attachments', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+    if (!Array.isArray(data) || !data.length) return
+    let usedCaption = false
+    for (const att of data) {
+      const localId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2)}`
+      const temp: Msg = {
+        localId,
+        status: 'pending',
+        room_id: roomId.value!,
+        sender_id: meId.value!,
+        content: usedCaption ? null : (text.value || null),
+        created_at: new Date().toISOString(),
+        attachments: [{ id: att.id, url: att.url, filename: att.filename, content_type: att.content_type, size_bytes: att.size_bytes }]
+      }
+      messages.value.push(temp)
+      scheduleScrollToBottom()
+      const payload = { room_id: roomId.value, content: temp.content, attachment_ids: [att.id] }
+      if (!usedCaption && temp.content) { text.value = '' }
+      usedCaption = true
+      try {
+        const { data: msgData } = await api.post('/api/chat/messages', payload)
+        const idx = messages.value.findIndex(m => m.localId === localId)
+        if (idx >= 0) {
+          messages.value[idx] = msgData
+          if (msgData?.id) messageIds.add(msgData.id)
+          scheduleScrollToBottom()
+        }
+      } catch (e: any) {
+        const idx = messages.value.findIndex(m => m.localId === localId)
+        if (idx >= 0) messages.value[idx].status = 'failed'
+      }
+    }
+  } catch {}
 }
 </script>
 
@@ -468,7 +580,20 @@ function scheduleScrollToBottom() {
 .msg.me { justify-content: flex-end; }
 .bubble { background: #f3f4f6; padding: 8px 12px; border-radius: 10px; max-width: 70%; white-space: pre-wrap; }
 .msg.me .bubble { background: #4f46e5; color: #fff; }
+.bubble.image-only { background: transparent; padding: 0; border: 1px solid #e5e7eb; border-radius: 10px; display: inline-block; max-width: unset; overflow: hidden; }
+.msg.me .bubble.image-only { background: transparent; color: inherit; border-color: rgba(0,0,0,0.15); }
 .editor { border-top: 1px solid #eee; padding: 8px; display: flex; gap: 8px; }
+.attachments { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 6px; max-width: 360px; }
+.attachments.image-only { display: inline-grid; grid-template-columns: 1fr; gap: 0; margin-top: 0; max-width: unset; }
+.image-att { max-width: 100%; max-height: 240px; width: auto; height: auto; object-fit: contain; border-radius: 8px; display: block; }
+.file-card { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 8px; min-width: 220px; max-width: 320px; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; }
+.msg.me .file-card { background: rgba(255,255,255,0.95); }
+.file-icon { font-size: 18px; }
+.file-info { min-width: 0; }
+.file-name { font-weight: 600; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.file-meta { color: #6b7280; font-size: 12px; margin-top: 2px; }
+.file-action { color: #4f46e5; font-weight: 600; text-decoration: none; }
+.file-action:hover { text-decoration: underline; }
 .dot-loading {
   display: inline-block;
   width: 14px;

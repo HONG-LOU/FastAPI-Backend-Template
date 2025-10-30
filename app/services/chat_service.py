@@ -16,6 +16,7 @@ from app.core.exceptions import BadRequest, Forbidden, UserNotFound, NotFound
 from app.core.redis import get_redis, publish_model
 from app.db.session import AsyncSessionLocal
 from app.models.chat import ChatParticipant, ChatRoom, Message
+from app.models.attachment import Attachment
 from app.models.user import User
 from app.schemas.chat import (
     MarkReadIn,
@@ -96,6 +97,10 @@ async def create_direct_room_service(
     return RoomOut.model_validate(room, from_attributes=True)
 
 
+def _att_url(att_id: int) -> str:
+    return f"/api/chat/attachments/{att_id}/download"
+
+
 async def list_messages_service(
     db: AsyncSession, room_id: int, current_user_id: int, limit: int, cursor: int | None
 ) -> list[MessageOut]:
@@ -115,7 +120,40 @@ async def list_messages_service(
         stmt = stmt.where(Message.id < cursor)
     stmt = stmt.order_by(desc(Message.id)).limit(limit)
     rows = (await db.execute(stmt)).scalars().all()
-    return [MessageOut.model_validate(m, from_attributes=True) for m in rows]
+    mids = [int(m.id) for m in rows]
+    amap: dict[int, list[Attachment]] = {}
+    if mids:
+        arows = (
+            await db.execute(select(Attachment).where(Attachment.message_id.in_(mids)))
+        ).scalars().all()
+        for a in arows:
+            amap.setdefault(int(a.message_id or 0), []).append(a)
+    out: list[MessageOut] = []
+    for m in rows:
+        atts = [
+            {
+                "id": int(a.id),
+                "message_id": int(m.id),
+                "filename": a.filename,
+                "content_type": a.content_type,
+                "size_bytes": a.size_bytes,
+                "status": a.status,
+                "created_at": a.created_at,
+                "url": _att_url(int(a.id)),
+            }
+            for a in amap.get(int(m.id), [])
+        ]
+        mo = MessageOut(
+            id=int(m.id),
+            room_id=int(m.room_id),
+            sender_id=int(m.sender_id),
+            kind=m.kind,
+            content=m.content,
+            created_at=m.created_at,
+            attachments=atts,
+        )
+        out.append(mo)
+    return out
 
 
 async def list_rooms_service(
@@ -207,15 +245,42 @@ async def send_message_service(
     if exists.scalar_one_or_none() is None:
         raise Forbidden("forbidden")
 
+    att_ids = [int(x) for x in (payload.attachment_ids or [])]
+    if att_ids:
+        arows = (
+            await db.execute(
+                select(Attachment).where(
+                    and_(Attachment.id.in_(att_ids), Attachment.uploader_id == current_user_id)
+                )
+            )
+        ).scalars().all()
+        if len(arows) != len(att_ids):
+            raise Forbidden("invalid attachment owner or missing")
+        if any(a.message_id is not None for a in arows):
+            raise BadRequest("attachment already linked")
+
     msg = Message(
         room_id=payload.room_id,
         sender_id=current_user_id,
         content=payload.content or "",
-        kind="text",
+        kind="file" if att_ids else "text",
     )
     db.add(msg)
     await db.commit()
     await db.refresh(msg)
+
+    if att_ids:
+        await db.execute(
+            update(Attachment)
+            .where(Attachment.id.in_(att_ids))
+            .values(message_id=msg.id)
+        )
+        await db.commit()
+        arows = (
+            await db.execute(select(Attachment).where(Attachment.message_id == msg.id))
+        ).scalars().all()
+    else:
+        arows = []
 
     await publish_model(
         f"chat:room:{payload.room_id}",
@@ -224,8 +289,21 @@ async def send_message_service(
             id=msg.id,
             room_id=msg.room_id,
             sender_id=msg.sender_id,
-            content=msg.content or "",
+            content=msg.content or None,
             created_at=msg.created_at,
+            attachments=[
+                {
+                    "id": int(a.id),
+                    "message_id": int(msg.id),
+                    "filename": a.filename,
+                    "content_type": a.content_type,
+                    "size_bytes": a.size_bytes,
+                    "status": a.status,
+                    "created_at": a.created_at,
+                    "url": _att_url(int(a.id)),
+                }
+                for a in arows
+            ],
         ),
     )
 
@@ -254,7 +332,27 @@ async def send_message_service(
             await cast(Awaitable[Any], pipe.execute())
         except Exception:
             pass
-    return MessageOut.model_validate(msg, from_attributes=True)
+    return MessageOut(
+        id=int(msg.id),
+        room_id=int(msg.room_id),
+        sender_id=int(msg.sender_id),
+        kind=msg.kind,
+        content=msg.content or None,
+        created_at=msg.created_at,
+        attachments=[
+            {
+                "id": int(a.id),
+                "message_id": int(msg.id),
+                "filename": a.filename,
+                "content_type": a.content_type,
+                "size_bytes": a.size_bytes,
+                "status": a.status,
+                "created_at": a.created_at,
+                "url": _att_url(int(a.id)),
+            }
+            for a in arows
+        ],
+    )
 
 
 async def create_group_room_service(

@@ -66,6 +66,56 @@ let ws: WebSocket | null = null
 const sending = ref(false)
 const messagesEl = ref<HTMLElement | null>(null)
 const editorRef = ref<InstanceType<typeof NInput> | null>(null)
+const audioCtx = ref<AudioContext | null>(null)
+
+function ensureAudioContext() {
+  try {
+    if (!audioCtx.value) {
+      const AC = (window as any).AudioContext || (window as any).webkitAudioContext
+      if (!AC) return
+      audioCtx.value = new AC()
+    }
+    if (audioCtx.value && audioCtx.value.state === 'suspended') {
+      audioCtx.value.resume().catch(() => {})
+    }
+  } catch {}
+}
+
+function playBeep() {
+  try {
+    ensureAudioContext()
+    const ctx = audioCtx.value
+    if (!ctx) return
+    const oscillator = ctx.createOscillator()
+    const gain = ctx.createGain()
+    oscillator.type = 'sine'
+    oscillator.frequency.value = 880
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.04, ctx.currentTime + 0.01)
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25)
+    oscillator.connect(gain)
+    gain.connect(ctx.destination)
+    oscillator.start()
+    oscillator.stop(ctx.currentTime + 0.3)
+  } catch {}
+}
+
+function requestNotificationPermission() {
+  if (typeof Notification === 'undefined') return
+  if (Notification.permission === 'default') {
+    Notification.requestPermission().catch(() => {})
+  }
+}
+
+function showDesktopNotification(m: Msg) {
+  if (typeof Notification === 'undefined') return
+  if (document.visibilityState === 'visible') return
+  if (Notification.permission !== 'granted') return
+  try {
+    const n = new Notification('新消息', { body: m.content })
+    n.onclick = () => { window.focus(); n.close() }
+  } catch {}
+}
 
 onMounted(async () => {
   try {
@@ -75,6 +125,10 @@ onMounted(async () => {
   } catch (e) {
     // ignore
   }
+  // 预先请求通知权限，并在首次交互后恢复音频上下文
+  requestNotificationPermission()
+  window.addEventListener('click', ensureAudioContext, { once: true })
+  window.addEventListener('keydown', ensureAudioContext, { once: true })
   await loadConversations()
   const cached = Number(localStorage.getItem('selected_room_id') || 0)
   if (cached && conversations.value.some(c => c.id === cached)) {
@@ -148,6 +202,10 @@ function connectWs() {
       if (payload.type === 'message') {
         addMessage(payload)
         removePendingDuplicate(payload)
+        if (payload.sender_id !== meId.value) {
+          playBeep()
+          showDesktopNotification(payload)
+        }
       }
     } catch {}
   }

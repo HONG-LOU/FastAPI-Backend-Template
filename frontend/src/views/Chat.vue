@@ -21,7 +21,7 @@
           </div>
         </div>
         <div class="tools">
-          <n-input v-model:value="search" placeholder="输入用户ID开始聊天" />
+          <n-input v-model:value="search" placeholder="输入邮箱或用户ID开始聊天" />
           <n-button block style="margin-top:8px" @click="createDirectRoom">创建直聊</n-button>
         </div>
       </aside>
@@ -88,13 +88,23 @@ onBeforeUnmount(() => {
 })
 
 async function createDirectRoom() {
-  const uid = Number(search.value)
-  if (!uid) {
-    message.warning('请输入有效的用户ID')
+  const raw = (search.value || '').trim()
+  if (!raw) {
+    message.warning('请输入邮箱或用户ID')
     return
   }
+  let payload: any
+  if (raw.includes('@')) payload = { email: raw }
+  else {
+    const uid = Number(raw)
+    if (!uid) {
+      message.warning('请输入有效的邮箱或用户ID')
+      return
+    }
+    payload = { user_id: uid }
+  }
   try {
-    const { data } = await api.post('/api/chat/rooms/direct', { user_id: uid })
+    const { data } = await api.post('/api/chat/rooms/direct', payload)
     roomId.value = data.id
     await loadMessages()
     connectWs()

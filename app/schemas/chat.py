@@ -1,7 +1,7 @@
 from datetime import datetime
 
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, EmailStr, model_validator
 
 
 class WSMessage(BaseModel):
@@ -39,7 +39,16 @@ class MessageOut(BaseModel):
 
 
 class RoomCreateDirect(BaseModel):
-    user_id: int
+    user_id: int | None = None
+    email: EmailStr | None = None
+
+    @model_validator(mode="after")
+    def _check_target(self) -> "RoomCreateDirect":
+        if (self.user_id is None) and (self.email is None):
+            raise ValueError("either user_id or email is required")
+        if (self.user_id is not None) and (self.email is not None):
+            raise ValueError("provide only one of user_id or email")
+        return self
 
 
 class RoomOut(BaseModel):

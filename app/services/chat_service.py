@@ -12,7 +12,7 @@ from app.services.ws_broker import get_broker, WebSocketConnection
 from app.core.metrics import inc
 from app.core.logging import get_logger
 
-from app.core.exceptions import BadRequest, Forbidden
+from app.core.exceptions import BadRequest, Forbidden, UserNotFound
 from app.core.redis import get_redis, publish_model
 from app.db.session import AsyncSessionLocal
 from app.models.chat import ChatParticipant, ChatRoom, Message
@@ -42,7 +42,18 @@ def _unread_key(room_id: int, user_id: int) -> str:
 async def create_direct_room_service(
     db: AsyncSession, payload: RoomCreateDirect, current_user_id: int
 ) -> RoomOut:
-    if payload.user_id == current_user_id:
+    target_user_id: int
+    if payload.email is not None:
+        user_row = (await db.execute(select(User).where(User.email == payload.email))).scalar_one_or_none()
+        if user_row is None:
+            raise UserNotFound("User not found by email")
+        target_user_id = int(user_row.id)
+    else:
+        target_user_id = int(payload.user_id or 0)
+        user_row = (await db.execute(select(User).where(User.id == target_user_id))).scalar_one_or_none()
+        if user_row is None:
+            raise UserNotFound("User not found by id")
+    if target_user_id == current_user_id:
         raise BadRequest("cannot create direct room with self")
 
     cp1 = aliased(ChatParticipant)
@@ -55,7 +66,7 @@ async def create_direct_room_service(
             and_(
                 ChatRoom.type == "direct",
                 cp1.user_id == current_user_id,
-                cp2.user_id == payload.user_id,
+                cp2.user_id == target_user_id,
             )
         )
         .order_by(ChatRoom.id)
@@ -68,12 +79,10 @@ async def create_direct_room_service(
     room = ChatRoom(type="direct")
     db.add(room)
     await db.flush()
-    db.add_all(
-        [
-            ChatParticipant(room_id=room.id, user_id=current_user_id),
-            ChatParticipant(room_id=room.id, user_id=payload.user_id),
-        ]
-    )
+    db.add_all([
+        ChatParticipant(room_id=room.id, user_id=current_user_id),
+        ChatParticipant(room_id=room.id, user_id=target_user_id),
+    ])
     await db.commit()
     await db.refresh(room)
     return RoomOut.model_validate(room, from_attributes=True)

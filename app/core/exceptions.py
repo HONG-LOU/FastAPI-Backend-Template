@@ -174,3 +174,14 @@ class VerificationExpired(AppException):
         data: Any | None = None,
     ) -> None:
         super().__init__(message, code=code, status_code=401, data=data)
+
+
+class UserNotFound(NotFound):
+    def __init__(
+        self,
+        message: str = "User not found",
+        *,
+        code: int = 24001,
+        data: Any | None = None,
+    ) -> None:
+        super().__init__(message, code=code, data=data)

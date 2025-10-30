@@ -44,13 +44,17 @@ async def create_direct_room_service(
 ) -> RoomOut:
     target_user_id: int
     if payload.email is not None:
-        user_row = (await db.execute(select(User).where(User.email == payload.email))).scalar_one_or_none()
+        user_row = (
+            await db.execute(select(User).where(User.email == payload.email))
+        ).scalar_one_or_none()
         if user_row is None:
             raise UserNotFound("User not found by email")
         target_user_id = int(user_row.id)
     else:
         target_user_id = int(payload.user_id or 0)
-        user_row = (await db.execute(select(User).where(User.id == target_user_id))).scalar_one_or_none()
+        user_row = (
+            await db.execute(select(User).where(User.id == target_user_id))
+        ).scalar_one_or_none()
         if user_row is None:
             raise UserNotFound("User not found by id")
     if target_user_id == current_user_id:
@@ -79,10 +83,12 @@ async def create_direct_room_service(
     room = ChatRoom(type="direct")
     db.add(room)
     await db.flush()
-    db.add_all([
-        ChatParticipant(room_id=room.id, user_id=current_user_id),
-        ChatParticipant(room_id=room.id, user_id=target_user_id),
-    ])
+    db.add_all(
+        [
+            ChatParticipant(room_id=room.id, user_id=current_user_id),
+            ChatParticipant(room_id=room.id, user_id=target_user_id),
+        ]
+    )
     await db.commit()
     await db.refresh(room)
     return RoomOut.model_validate(room, from_attributes=True)
@@ -110,7 +116,9 @@ async def list_messages_service(
     return [MessageOut.model_validate(m, from_attributes=True) for m in rows]
 
 
-async def list_rooms_service(db: AsyncSession, current_user_id: int) -> list[RoomSummaryOut]:
+async def list_rooms_service(
+    db: AsyncSession, current_user_id: int
+) -> list[RoomSummaryOut]:
     cp_self = ChatParticipant
     last_sub = (
         select(Message.room_id, func.max(Message.id).label("last_id"))
@@ -138,7 +146,9 @@ async def list_rooms_service(db: AsyncSession, current_user_id: int) -> list[Roo
             .join(User, User.id == cp2.user_id)
             .where(and_(cp2.room_id.in_(room_ids), cp2.user_id != current_user_id))
         )
-        for room_id, uid, name, email, avatar_path in (await db.execute(peer_stmt)).all():
+        for room_id, uid, name, email, avatar_path in (
+            await db.execute(peer_stmt)
+        ).all():
             peers_map[int(room_id)] = (int(uid), name, email, avatar_path)
 
     redis = await get_redis()
@@ -157,8 +167,16 @@ async def list_rooms_service(db: AsyncSession, current_user_id: int) -> list[Roo
     items: list[RoomSummaryOut] = []
     for room, last in rows:
         peer = peers_map.get(int(room.id))
-        peer_out = None if peer is None else PeerOut(id=peer[0], name=peer[1], email=peer[2], avatar_url=peer[3])
-        last_out = None if last is None else MessageOut.model_validate(last, from_attributes=True)
+        peer_out = (
+            None
+            if peer is None
+            else PeerOut(id=peer[0], name=peer[1], email=peer[2], avatar_url=peer[3])
+        )
+        last_out = (
+            None
+            if last is None
+            else MessageOut.model_validate(last, from_attributes=True)
+        )
         items.append(
             RoomSummaryOut(
                 id=int(room.id),

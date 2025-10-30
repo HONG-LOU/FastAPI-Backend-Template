@@ -9,10 +9,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# 安装 uv 并同步依赖
+# 安装 uv 并同步依赖到系统环境
 COPY pyproject.toml uv.lock ./
 RUN pip install --no-cache-dir uv && \
-    uv sync --frozen --no-dev --system
+    uv export --frozen --no-dev -o requirements.txt && \
+    uv pip install --system -r requirements.txt
 
 # 复制应用代码
 COPY app ./app

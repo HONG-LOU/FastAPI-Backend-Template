@@ -420,7 +420,7 @@ function scrollToBottom() {
 .messages { flex: 1; padding: 12px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
 .msg { display: flex; }
 .msg.me { justify-content: flex-end; }
-.bubble { background: #f3f4f6; padding: 8px 12px; border-radius: 10px; max-width: 70%; }
+.bubble { background: #f3f4f6; padding: 8px 12px; border-radius: 10px; max-width: 70%; white-space: pre-wrap; }
 .msg.me .bubble { background: #4f46e5; color: #fff; }
 .editor { border-top: 1px solid #eee; padding: 8px; display: flex; gap: 8px; }
 .dot-loading {

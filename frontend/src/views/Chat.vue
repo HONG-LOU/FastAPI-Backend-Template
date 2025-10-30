@@ -175,7 +175,7 @@ function showDesktopNotification(m: Msg) {
   if (document.visibilityState === 'visible') return
   if (Notification.permission !== 'granted') return
   try {
-    const n = new Notification('新消息', { body: m.content })
+    const n = new Notification('新消息', { body: m.content || undefined })
     n.onclick = () => { window.focus(); n.close() }
   } catch {}
 }

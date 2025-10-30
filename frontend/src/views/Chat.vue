@@ -8,8 +8,22 @@
     </header>
     <section class="content">
       <aside class="sidebar">
-        <n-input v-model:value="search" placeholder="输入用户ID开始聊天" />
-        <n-button block style="margin-top:8px" @click="createDirectRoom">创建直聊</n-button>
+        <div class="convs" v-if="conversations.length">
+          <div
+            v-for="c in conversations"
+            :key="c.id"
+            class="conv"
+            :class="{ active: c.id===roomId }"
+            @click="selectRoom(c.id)"
+          >
+            <div class="title">{{ c.peer?.name || c.peer?.email || '群聊' }}</div>
+            <div class="preview">{{ c.last_message?.content || ' ' }}</div>
+          </div>
+        </div>
+        <div class="tools">
+          <n-input v-model:value="search" placeholder="输入用户ID开始聊天" />
+          <n-button block style="margin-top:8px" @click="createDirectRoom">创建直聊</n-button>
+        </div>
       </aside>
       <main class="main">
         <div class="messages" ref="messagesEl">
@@ -44,6 +58,7 @@ const meId = ref<number | null>(null)
 const meEmail = ref<string>('')
 const roomId = ref<number | null>(null)
 const messages = ref<Msg[]>([])
+const conversations = ref<any[]>([])
 const messageIds = new Set<number>()
 const text = ref('')
 const search = ref('')
@@ -58,6 +73,13 @@ onMounted(async () => {
     meEmail.value = data.email
   } catch (e) {
     // ignore
+  }
+  await loadConversations()
+  const cached = Number(localStorage.getItem('selected_room_id') || 0)
+  if (cached && conversations.value.some(c => c.id === cached)) {
+    await selectRoom(cached)
+  } else if (conversations.value.length) {
+    await selectRoom(conversations.value[0].id)
   }
 })
 
@@ -90,10 +112,24 @@ async function loadMessages() {
   scrollToBottom()
 }
 
+async function loadConversations() {
+  const { data } = await api.get('/api/chat/rooms')
+  conversations.value = data
+}
+
+async function selectRoom(id: number) {
+  if (roomId.value === id) return
+  roomId.value = id
+  localStorage.setItem('selected_room_id', String(id))
+  await loadMessages()
+  connectWs()
+}
+
 function connectWs() {
   if (!roomId.value || !auth.tokens?.access_token) return
   if (ws) ws.close()
-  const wsUrl = (import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000') + `/api/chat/ws?room_id=${roomId.value}&token=${auth.tokens.access_token}`
+  const wsBase = (import.meta.env as any).VITE_WS_BASE_URL ?? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`
+  const wsUrl = `${wsBase}/api/chat/ws?room_id=${roomId.value}&token=${auth.tokens.access_token}`
   ws = new WebSocket(wsUrl)
   ws.onmessage = (ev) => {
     try {
@@ -130,6 +166,8 @@ async function send() {
     } else {
       addMessage(data)
     }
+    const ci = conversations.value.findIndex(c => c.id === roomId.value)
+    if (ci >= 0) conversations.value[ci] = { ...conversations.value[ci], last_message: data }
   } catch (e: any) {
     for (let i = messages.value.length - 1; i >= 0; i--) {
       const m = messages.value[i]
@@ -178,6 +216,12 @@ function scrollToBottom() {
 .me { color: #6b7280; font-size: 14px; }
 .content { flex: 1; display: flex; min-height: 0; }
 .sidebar { width: 280px; border-right: 1px solid #eee; padding: 12px; display: flex; flex-direction: column; }
+.convs { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.conv { padding: 8px; border-radius: 8px; cursor: pointer; }
+.conv.active { background: #eef2ff; }
+.conv .title { font-weight: 600; font-size: 14px; }
+.conv .preview { color: #6b7280; font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tools { border-top: 1px solid #eee; padding-top: 8px; margin-top: 8px; }
 .main { flex: 1; display: flex; flex-direction: column; }
 .messages { flex: 1; padding: 12px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
 .msg { display: flex; }

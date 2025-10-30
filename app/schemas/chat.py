@@ -79,3 +79,21 @@ class MarkReadIn(BaseModel):
 
 class UnreadCountOut(BaseModel):
     count: int
+
+
+class PeerOut(BaseModel):
+    id: int
+    email: str
+    name: str | None = None
+    avatar_url: str | None = None
+
+
+class RoomSummaryOut(BaseModel):
+    id: int
+    type: str
+    peer: PeerOut | None = None
+    last_message: MessageOut | None = None
+    unread_count: int = 0
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

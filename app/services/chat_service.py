@@ -5,7 +5,7 @@ import asyncio
 import contextlib
 
 from fastapi import WebSocket, WebSocketDisconnect
-from sqlalchemy import and_, desc, select, update, or_
+from sqlalchemy import and_, desc, select, update, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 from app.services.ws_broker import get_broker, WebSocketConnection
@@ -21,6 +21,8 @@ from app.schemas.chat import (
     MarkReadIn,
     MessageCreate,
     MessageOut,
+    PeerOut,
+    RoomSummaryOut,
     RoomCreateDirect,
     RoomOut,
     UnreadCountOut,
@@ -97,6 +99,68 @@ async def list_messages_service(
     stmt = stmt.order_by(desc(Message.id)).limit(limit)
     rows = (await db.execute(stmt)).scalars().all()
     return [MessageOut.model_validate(m, from_attributes=True) for m in rows]
+
+
+async def list_rooms_service(db: AsyncSession, current_user_id: int) -> list[RoomSummaryOut]:
+    cp_self = ChatParticipant
+    last_sub = (
+        select(Message.room_id, func.max(Message.id).label("last_id"))
+        .group_by(Message.room_id)
+        .subquery()
+    )
+
+    base = (
+        select(ChatRoom, Message)
+        .join(cp_self, cp_self.room_id == ChatRoom.id)
+        .outerjoin(last_sub, last_sub.c.room_id == ChatRoom.id)
+        .outerjoin(Message, Message.id == last_sub.c.last_id)
+        .where(cp_self.user_id == current_user_id)
+        .order_by(Message.id.desc().nullslast(), ChatRoom.id.desc())
+    )
+
+    rows = (await db.execute(base)).all()
+    room_ids = [int(r[0].id) for r in rows]
+
+    peers_map: dict[int, tuple[int, str | None, str, str | None]] = {}
+    if room_ids:
+        cp2 = ChatParticipant
+        peer_stmt = (
+            select(cp2.room_id, User.id, User.name, User.email, User.avatar_path)
+            .join(User, User.id == cp2.user_id)
+            .where(and_(cp2.room_id.in_(room_ids), cp2.user_id != current_user_id))
+        )
+        for room_id, uid, name, email, avatar_path in (await db.execute(peer_stmt)).all():
+            peers_map[int(room_id)] = (int(uid), name, email, avatar_path)
+
+    redis = await get_redis()
+    unread: dict[int, int] = {}
+    if room_ids:
+        pipe = redis.pipeline(transaction=False)
+        for room_id in room_ids:
+            pipe.get(_unread_key(room_id, current_user_id))
+        vals = await pipe.execute()  # type: ignore
+        for room_id, v in zip(room_ids, vals):
+            try:
+                unread[room_id] = int(v or 0)
+            except Exception:
+                unread[room_id] = 0
+
+    items: list[RoomSummaryOut] = []
+    for room, last in rows:
+        peer = peers_map.get(int(room.id))
+        peer_out = None if peer is None else PeerOut(id=peer[0], name=peer[1], email=peer[2], avatar_url=peer[3])
+        last_out = None if last is None else MessageOut.model_validate(last, from_attributes=True)
+        items.append(
+            RoomSummaryOut(
+                id=int(room.id),
+                type=room.type,
+                peer=peer_out,
+                last_message=last_out,
+                unread_count=unread.get(int(room.id), 0),
+                created_at=room.created_at,
+            )
+        )
+    return items
 
 
 async def send_message_service(

@@ -46,34 +46,37 @@
           <n-button v-if="currentRoom.type==='group'" size="small" @click="onAddMember">添加成员</n-button>
         </div>
         <div class="messages" ref="messagesEl">
-          <div v-for="m in messages" :key="m.localId || m.id" class="msg" :class="{ me: m.sender_id===meId }">
-            <div class="bubble" :class="{ 'image-only': !m.content && m.attachments?.length && m.attachments.every(a => a.content_type && a.content_type.startsWith('image/')) }">
-              <span v-if="m.content">{{ m.content }}</span>
-              <template v-if="m.attachments?.length">
-                <div class="attachments" :class="{ 'image-only': !m.content && m.attachments?.length && m.attachments.every(a => a.content_type && a.content_type.startsWith('image/')) }">
-                  <template v-for="a in m.attachments" :key="a.id">
-                    <img
-                      v-if="a.content_type && a.content_type.startsWith('image/')"
-                      :src="attSrcMap[a.id] || a.url"
-                      class="image-att"
-                      @error="() => fetchImageBlob(a)"
-                      @load="scheduleScrollToBottom"
-                    />
-                    <div v-else class="file-card">
-                      <div class="file-icon">📄</div>
-                      <div class="file-info">
-                        <div class="file-name" :title="a.filename">{{ a.filename }}</div>
-                        <div class="file-meta">{{ formatSize(a.size_bytes) }}</div>
+          <template v-for="m in displayMessages" :key="m.localId || m.id">
+            <div v-if="m._showTime" class="time-sep">{{ m._timeText }}</div>
+            <div class="msg" :class="{ me: m.sender_id===meId }">
+              <div class="bubble" :class="{ 'image-only': !m.content && m.attachments?.length && m.attachments.every(a => a.content_type && a.content_type.startsWith('image/')) }">
+                <span v-if="m.content">{{ m.content }}</span>
+                <template v-if="m.attachments?.length">
+                  <div class="attachments" :class="{ 'image-only': !m.content && m.attachments?.length && m.attachments.every(a => a.content_type && a.content_type.startsWith('image/')) }">
+                    <template v-for="a in m.attachments" :key="a.id">
+                      <img
+                        v-if="a.content_type && a.content_type.startsWith('image/')"
+                        :src="attSrcMap[a.id] || a.url"
+                        class="image-att"
+                        @error="() => fetchImageBlob(a)"
+                        @load="scheduleScrollToBottom"
+                      />
+                      <div v-else class="file-card">
+                        <div class="file-icon">📄</div>
+                        <div class="file-info">
+                          <div class="file-name" :title="a.filename">{{ a.filename }}</div>
+                          <div class="file-meta">{{ formatSize(a.size_bytes) }}</div>
+                        </div>
+                        <a class="file-action" :href="a.url" :download="a.filename" target="_blank" rel="noopener noreferrer">下载</a>
                       </div>
-                      <a class="file-action" :href="a.url" :download="a.filename" target="_blank" rel="noopener noreferrer">下载</a>
-                    </div>
-                  </template>
-                </div>
-              </template>
-              <span v-if="m.status==='pending'" class="dot-loading" />
-              <span v-if="m.status==='failed'" class="failed">发送失败</span>
+                    </template>
+                  </div>
+                </template>
+                <span v-if="m.status==='pending'" class="dot-loading" />
+                <span v-if="m.status==='failed'" class="failed">发送失败</span>
+              </div>
             </div>
-          </div>
+          </template>
           <div ref="bottomEl"></div>
         </div>
         <div class="editor" @paste.prevent="onPaste" @dragover.prevent @drop.prevent="onDrop">
@@ -128,6 +131,20 @@ const editorRef = ref<InstanceType<typeof NInput> | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const audioCtx = ref<AudioContext | null>(null)
 const attSrcMap = ref<Record<number, string>>({})
+
+type MsgView = Msg & { _showTime?: boolean; _timeText?: string }
+
+const displayMessages = computed<MsgView[]>(() => {
+  const out: MsgView[] = []
+  let lastTs = 0
+  for (const m of messages.value) {
+    const ts = new Date(m.created_at).getTime()
+    const show = !lastTs || (ts - lastTs) >= 5 * 60 * 1000
+    out.push({ ...m, _showTime: show, _timeText: formatTime(m.created_at) })
+    if (!isNaN(ts)) lastTs = ts
+  }
+  return out
+})
 
 function ensureAudioContext() {
   try {
@@ -490,6 +507,18 @@ function formatSize(n: number) {
   return n + ' B'
 }
 
+function pad2(n: number) { return n < 10 ? '0' + n : '' + n }
+function formatTime(iso: string) {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  const y = d.getFullYear()
+  const m = pad2(d.getMonth() + 1)
+  const day = pad2(d.getDate())
+  const hh = pad2(d.getHours())
+  const mm = pad2(d.getMinutes())
+  return `${y}-${m}-${day} ${hh}:${mm}`
+}
+
 function pickFiles() {
   fileInputRef.value?.click()
 }
@@ -576,6 +605,7 @@ async function uploadAndSend(files: File[]) {
 .room-header { height: 44px; display: flex; align-items: center; padding: 0 12px; border-bottom: 1px solid #eee; }
 .room-title { font-weight: 600; }
 .messages { flex: 1; padding: 12px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.time-sep { align-self: center; color: #6b7280; font-size: 12px; margin: 4px 0; }
 .msg { display: flex; }
 .msg.me { justify-content: flex-end; }
 .bubble { background: #f3f4f6; padding: 8px 12px; border-radius: 10px; max-width: 70%; white-space: pre-wrap; }

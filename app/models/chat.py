@@ -1,20 +1,20 @@
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, Text, func
+from sqlalchemy import ForeignKey, String, Text, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.models.mixins import DateTimeMixin
 
 
-class ChatRoom(Base):
+class ChatRoom(Base, DateTimeMixin):
     __tablename__ = "chat_rooms"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     type: Mapped[str] = mapped_column(String(16), default="direct", index=True)
-    created_at: Mapped[datetime] = mapped_column(default=func.now(), index=True)
 
 
-class ChatParticipant(Base):
+class ChatParticipant(Base, DateTimeMixin):
     __tablename__ = "chat_participants"
 
     room_id: Mapped[int] = mapped_column(
@@ -24,11 +24,13 @@ class ChatParticipant(Base):
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True
     )
     role: Mapped[str] = mapped_column(String(16), default="participant")
-    joined_at: Mapped[datetime] = mapped_column(default=func.now())
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=func.now()
+    )
     last_read_message_id: Mapped[int | None] = mapped_column(index=True)
 
 
-class Message(Base):
+class Message(Base, DateTimeMixin):
     __tablename__ = "messages"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -40,4 +42,3 @@ class Message(Base):
     )
     kind: Mapped[str] = mapped_column(String(16), default="text", index=True)
     content: Mapped[str | None] = mapped_column(Text())
-    created_at: Mapped[datetime] = mapped_column(default=func.now(), index=True)

@@ -14,7 +14,6 @@ from app.core.logging import get_logger
 
 from app.core.exceptions import BadRequest, Forbidden
 from app.core.redis import get_redis, publish_model
-from app.db.session import AsyncSessionLocal
 from app.models.chat import ChatParticipant, ChatRoom, Message
 from app.models.user import User
 from app.schemas.chat import (
@@ -335,9 +334,8 @@ async def ws_handler(ws: WebSocket) -> None:
         await ws.close(code=1008)
         return
 
-    user: User | None = await ws_authorize_and_room_check(
-        token, room_id, AsyncSessionLocal
-    )
+    db_factory = cast(async_sessionmaker[AsyncSession], ws.app.state.db_sessionmaker)
+    user: User | None = await ws_authorize_and_room_check(token, room_id, db_factory)
     if user is None:
         await ws.close(code=1008)
         return

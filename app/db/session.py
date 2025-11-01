@@ -1,28 +1,10 @@
 from collections.abc import AsyncIterator
 
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
-
-from app.core.config import settings
+from fastapi import Request
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
-engine: AsyncEngine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=False,
-    pool_pre_ping=True,
-)
-
-AsyncSessionLocal = async_sessionmaker(
-    bind=engine,
-    expire_on_commit=False,
-    class_=AsyncSession,
-)
-
-
-async def get_db() -> AsyncIterator[AsyncSession]:
-    async with AsyncSessionLocal() as session:
+async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
+    factory: async_sessionmaker[AsyncSession] = request.app.state.db_sessionmaker
+    async with factory() as session:
         yield session

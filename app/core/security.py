@@ -7,6 +7,7 @@ from passlib.context import CryptContext
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.core.exceptions import TokenTypeMismatch
 
 
 pwd_context = CryptContext(schemes=["bcrypt_sha256"], deprecated="auto")
@@ -97,5 +98,5 @@ def verify_token(token: str, *, expected_type: str | None = None) -> JWTClaims:
     )
     data = JWTClaims.model_validate(claims)
     if expected_type and data.type != expected_type:
-        raise ValueError("Invalid token type")
+        raise TokenTypeMismatch()
     return data

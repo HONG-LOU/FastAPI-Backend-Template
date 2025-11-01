@@ -22,6 +22,13 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str
 
+    # DB pool
+    DB_POOL_SIZE: int = 20
+    DB_MAX_OVERFLOW: int = 80
+    DB_POOL_TIMEOUT: int = 30
+    DB_POOL_RECYCLE: int = 1800
+    DB_POOL_USE_LIFO: bool = True
+
     # Redis
     REDIS_URL: str
 

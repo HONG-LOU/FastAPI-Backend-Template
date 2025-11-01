@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Sequence, cast
 
-from fastapi import Request
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -19,13 +19,8 @@ logger = get_logger(__name__)
 def _jsonable(obj: Any) -> Any:
     if isinstance(obj, Exception):
         return str(obj)
-    try:
-        from pydantic import BaseModel as _BM  # type: ignore
-
-        if isinstance(obj, _BM):
-            return obj.model_dump(exclude_none=True)
-    except Exception:
-        pass
+    if isinstance(obj, BaseModel):
+        return obj.model_dump(exclude_none=True)
     if isinstance(obj, (list, tuple, set)):
         seq = cast(Sequence[Any], obj)
         return [_jsonable(x) for x in seq]
@@ -95,3 +90,36 @@ async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
 async def asyncpg_exception_handler(request: Request, exc: Any):
     logger.exception("Postgres error: %s", str(exc))
     return _error_response(503, message="Database unavailable", code=12002)
+
+
+def register_exception_handlers(app: FastAPI) -> None:
+    from fastapi.exceptions import RequestValidationError
+    from fastapi import HTTPException as FastAPIHTTPException
+    from starlette.types import ExceptionHandler as StarletteExceptionHandler
+
+    app.add_exception_handler(
+        FastAPIHTTPException,  # type: ignore[arg-type]
+        cast(StarletteExceptionHandler, http_exception_handler),
+    )
+    app.add_exception_handler(
+        AppException, cast(StarletteExceptionHandler, app_exception_handler)
+    )
+    app.add_exception_handler(
+        RequestValidationError,
+        cast(StarletteExceptionHandler, validation_exception_handler),
+    )
+    app.add_exception_handler(
+        Exception, cast(StarletteExceptionHandler, unhandled_exception_handler)
+    )
+    app.add_exception_handler(
+        SQLAlchemyError, cast(StarletteExceptionHandler, sqlalchemy_exception_handler)
+    )
+    try:
+        import asyncpg as _asyncpg  # type: ignore[reportMissingTypeStubs]
+
+        app.add_exception_handler(
+            _asyncpg.PostgresError,
+            cast(StarletteExceptionHandler, asyncpg_exception_handler),
+        )
+    except Exception:
+        pass

@@ -1,17 +1,18 @@
 from datetime import datetime
 
-from sqlalchemy import String, Boolean, func, Text
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy import String, Boolean, Text
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, CITEXT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.models.mixins import DateTimeMixin
 
 
-class User(Base):
+class User(Base, DateTimeMixin):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    email: Mapped[str] = mapped_column(CITEXT(), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -23,7 +24,3 @@ class User(Base):
     intro: Mapped[str | None] = mapped_column(String(500))
     links: Mapped[list[str]] = mapped_column(JSONB, default=list)
     skills: Mapped[list[str]] = mapped_column(ARRAY(String), default=list, index=True)
-    created_at: Mapped[datetime] = mapped_column(default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        default=func.now(), onupdate=func.now()
-    )

@@ -77,8 +77,12 @@ async def validation_exception_handler(request: Request, exc: ValidationError):
     return _error_response(422, message="Validation error", code=11001, errors=errs)
 
 
-async def unhandled_exception_handler(request: Request, exc: Exception):
-    logger.exception("Unhandled exception: %s", str(exc))
+async def global_exception_handler(request: Request, exc: Exception):
+    try:
+        path = request.url.path
+    except Exception:
+        path = "-"
+    logger.exception("Unhandled exception at %s: %s", path, str(exc))
     return _error_response(500, message="Internal Server Error", code=19000)
 
 
@@ -109,7 +113,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         cast(StarletteExceptionHandler, validation_exception_handler),
     )
     app.add_exception_handler(
-        Exception, cast(StarletteExceptionHandler, unhandled_exception_handler)
+        Exception, cast(StarletteExceptionHandler, global_exception_handler)
     )
     app.add_exception_handler(
         SQLAlchemyError, cast(StarletteExceptionHandler, sqlalchemy_exception_handler)

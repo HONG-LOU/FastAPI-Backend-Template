@@ -38,6 +38,17 @@ class Settings(BaseSettings):
     FRONTEND_BASE_URL: str | None = None
     BACKEND_PUBLIC_BASE_URL: str | None = None
 
+    # Google OAuth
+    GOOGLE_CLIENT_ID: str | None = None
+    GOOGLE_CLIENT_SECRET: str | None = None
+    GOOGLE_REDIRECT_URI: str | None = None
+    GOOGLE_ALLOWED_HD: str | None = None
+
+    # LinkedIn OAuth
+    LINKEDIN_CLIENT_ID: str | None = None
+    LINKEDIN_CLIENT_SECRET: str | None = None
+    LINKEDIN_REDIRECT_URI: str | None = None
+
     # Mail
     SMTP_HOST: str | None = None
     SMTP_PORT: int | None = None
